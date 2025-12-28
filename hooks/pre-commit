@@ -1,0 +1,78 @@
+#!/bin/bash
+# Universal Python pre-commit hook
+# Configurable via environment variables
+
+set -e
+
+echo "🔍 Pre-commit code quality check..."
+
+# Virtual environment detection
+if [ -n "$VIRTUAL_ENV" ]; then
+    echo "✅ Virtual environment already active."
+elif [ -n "$PROJECT_VENV_PATH" ]; then
+    source "$PROJECT_VENV_PATH"/bin/activate
+elif [ -f ~/RTX_ENV/bin/activate ]; then
+    source ~/RTX_ENV/bin/activate
+elif [ -f .venv/bin/activate ]; then
+    source .venv/bin/activate
+elif [ -f venv/bin/activate ]; then
+    source venv/bin/activate
+else
+    echo "⚠️ No virtual environment found. Set PROJECT_VENV_PATH or create venv."
+    exit 1
+fi
+
+# Configuration (overridable via env vars)
+MAX_LINES=${MAX_LINES:-800}
+SRC_PATH=${SRC_PATH:-src/}
+
+# Get changed Python files
+CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+
+if [ -z "$CHANGED_FILES" ]; then
+    echo "✅ No Python files changed."
+    exit 0
+fi
+
+echo "📝 Changed files:"
+echo "$CHANGED_FILES"
+
+# Black formatting
+echo "🎨 Running Black formatter..."
+if ! black $CHANGED_FILES; then
+    echo "❌ Black formatting failed"
+    exit 1
+fi
+
+# Ruff auto-fix
+echo "🔧 Running Ruff auto-fix..."
+ruff check --fix $CHANGED_FILES || true
+
+# Ruff syntax check (required)
+echo "🔍 Checking for syntax errors..."
+if ! ruff check --select E9 $CHANGED_FILES; then
+    echo "❌ Syntax errors found. Please fix before committing."
+    exit 1
+fi
+
+# Python compile check
+echo "🐍 Python compile check..."
+if ! python -m compileall $CHANGED_FILES; then
+    echo "❌ Python compile errors found."
+    exit 1
+fi
+
+# LOC gate
+echo "📏 LOC check (max ${MAX_LINES} lines)..."
+for file in $CHANGED_FILES; do
+    lines=$(wc -l < "$file")
+    if [ "$lines" -gt "$MAX_LINES" ]; then
+        echo "❌ $file: $lines lines (exceeds $MAX_LINES)"
+        exit 1
+    fi
+done
+
+# Stage auto-fixed files
+git add $CHANGED_FILES
+
+echo "✅ All checks passed!"
