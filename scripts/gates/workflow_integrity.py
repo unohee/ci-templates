@@ -78,15 +78,24 @@ def code_part(line: str) -> str:
     """Return the line with any trailing comment removed, respecting quotes.
 
     A first version cut at the first `#` anywhere. That was a working bypass, not a
-    simplification: `printf \'# ready\'; pytest -q || true` is a valid step whose shell
-    swallows a test failure, and the scanner saw only `printf \'` and passed it.
+    simplification: `printf '# ready'; pytest -q || true` is a valid step whose shell
+    swallows a test failure, and the scanner saw only `printf '` and passed it.
 
     Both shells and YAML start a comment at a `#` that is outside quotes and begins a
-    word, so that is the rule applied here. A `#` inside quotes is data.
+    word, so that is the rule applied here. A `#` inside quotes is data. Backslash
+    escapes are honoured everywhere except inside single quotes, because without that
+    `echo "foo\" # fake" ; pytest -q || true` looked like it closed its quote at the
+    escape and the rest of the line — which the shell really runs — was cut as a comment.
     """
     in_single = in_double = False
+    escaped = False
     for i, ch in enumerate(line):
-        if ch == "\'" and not in_double:
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and not in_single:
+            escaped = True
+        elif ch == "'" and not in_double:
             in_single = not in_single
         elif ch == '"' and not in_single:
             in_double = not in_double
@@ -96,15 +105,46 @@ def code_part(line: str) -> str:
     return line
 
 
+def logical_lines(lines: list[str]) -> list[tuple[int, str]]:
+    """Join continuations so a construct split across lines is still one command.
+
+    YAML folds a `run: >` block into a single line, and a shell continues a line ending
+    in a backslash or a bare operator, so
+
+        bandit -r . ||
+        true
+
+    executes as `bandit -r . || true`. Scanning line by line missed it entirely. The
+    number reported is the line the construct starts on, which is where a reader looks.
+    """
+    out: list[tuple[int, str]] = []
+    pending_no: int | None = None
+    pending = ""
+    for i, raw in enumerate(lines, start=1):
+        code = code_part(raw).rstrip()
+        if pending:
+            code = pending + " " + code.strip()
+        else:
+            pending_no = i
+        if code.endswith(("\\", "||", "&&", "|")):
+            pending = code.rstrip("\\").rstrip()
+            continue
+        out.append((pending_no or i, code))
+        pending = ""
+        pending_no = None
+    if pending:
+        out.append((pending_no or len(lines), pending))
+    return out
+
+
 def scan(path: Path) -> list[tuple[int, str, str, str]]:
     """Return every gate-defeating construct in one workflow file."""
     breaches: list[tuple[int, str, str, str]] = []
-    for i, line in enumerate(
-            path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
-        code = code_part(line)
+    for line_no, code in logical_lines(
+            path.read_text(encoding="utf-8", errors="replace").splitlines()):
         for name, pattern, why in CONSTRUCTS:
             if pattern.search(code):
-                breaches.append((i, name, why, line.strip()))
+                breaches.append((line_no, name, why, code.strip()))
     return breaches
 
 

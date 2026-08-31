@@ -94,6 +94,14 @@ def main() -> int:
     doc = present[0]
     print(f"Art. IV: {doc} present")
 
+    # A repository's first push sends `before` as forty zeros, not an empty string, and
+    # `git diff 000...HEAD` is a fatal error rather than an empty diff. Passing it through
+    # made the whole constitution gate exit 2 on the first push of a new repository —
+    # which is the moment someone adopts it. Normalised here rather than in the workflow,
+    # because the same event reaches every gate and only one of them was handling it.
+    if args.base_ref and set(args.base_ref) == {"0"}:
+        args.base_ref = ""
+
     if not args.base_ref:
         # Art. VI — say what did not run instead of implying it passed.
         print("Art. IV: freshness check NOT RUN (no base ref; presence check only)")
