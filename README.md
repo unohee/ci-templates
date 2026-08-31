@@ -1,27 +1,62 @@
-# CI Templates
+# ci-templates
 
-Reusable CI/CD workflows and hooks for Python projects with **Fake Data Detection**.
+# ci-templates
 
-## Quick Start
+Reusable CI for the organisation: **constitution gate** enforcing [`book.md`](https://github.com/unohee/dev_runbook/blob/main/book.md), Python CI, and **fake data detection**.
 
-### 1. GitHub Actions (Reusable Workflow)
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the layout and the traps.
 
-Create `.github/workflows/ci.yml` in your project:
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the layout and the traps.
+
+## Constitution gate — every repository
+
+Language-agnostic. Add this and the Articles are enforced on your repo:
 
 ```yaml
-name: CI
+# .github/workflows/constitution.yml
+name: constitution
+
 on:
   push:
-    branches: [main, develop, 'feature/**']
+    branches: [main, develop, 'feature/**', 'fix/**', 'ci/**', 'chore/**']
   pull_request:
     branches: [main, develop]
-  workflow_dispatch:
 
+jobs:
+  gate:
+    uses: unohee/ci-templates/.github/workflows/constitution-gate.yml@main
+```
+
+Every input is optional:
+
+| Input | Default | Article |
+|---|---|---|
+| `loc-ceiling` | `1500` | III — max **code** lines per file (blank/comment excluded) |
+| `loc-window-days` | `30` | III — days over the ceiling before it is a breach |
+| `loc-exclude` | `''` | III — extra comma-separated path fragments to skip |
+| `architecture-depth` | `2` | IV — directory depth treated as "structure" |
+| `cxt-version` | `'0.3.0'` | II — pinned `@intrect/cxt` |
+| `gates-ref` | `'main'` | which ref the gate scripts come from |
+
+### What it checks
+
+| Job | Article | Fails when |
+|---|---|---|
+| `article-iii-loc` | III | a file has been over the ceiling for more than 30 days. Files inside the window are reported as warnings with the days remaining. |
+| `article-iv-architecture` | IV | `ARCHITECTURE.md` is missing, or a PR adds/removes directories without updating it. |
+| `protocol-55-trailers` | §5.5 | a commit in the range carries an AI co-author trailer. |
+| `article-ii-harness` | II | `cxt bs` reports a CRITICAL smell — or scans zero files, which means the gate did not run. |
+| `article-vi-workflow-integrity` | VI | a workflow file carries `continue-on-error: true`, `\|\| true`, `\|\| :`, `set +e`, `--exit-zero`, or a `continue-on-error` expression. **No exception mechanism** — if a command's non-zero exit is genuinely not a verdict, move it into a script and read the exit code there. |
+| `gate-self-test` | V | a gate's own fixture test fails — the ruler is broken, so every other result here is unreliable. |
+| `gate-integrity` | VI | **any** of the above is not `success`, including `skipped` and `cancelled`. |
+
+## Python CI — Python repositories
+
+```yaml
 jobs:
   ci:
     uses: unohee/ci-templates/.github/workflows/python-ci.yml@main
     with:
-      python-version: '3.12'
       src-path: 'src/'
       test-path: 'tests/unit/'
       coverage-threshold: 0
@@ -29,11 +64,16 @@ jobs:
       enable-fake-data-check: true
       feature-patterns: 'feature,program,arbitrage'
     secrets: inherit
+      test-path: 'tests/'
+      coverage-threshold: 42        # set your measured floor; 0 enforces nothing
 ```
 
-### 2. Pre-commit Hook
+`enforce-types` and `enforce-security` default to `true`. If your repo has not adopted
+typing yet, set `enforce-types: false` **in the caller** — a visible decision. Do not add
+`|| true` to the template; that is the same decision, hidden. Since 2026-08-31 that is not
+merely advice: `article-vi-workflow-integrity` reads your workflow files and fails on it.
 
-Copy the hook to your project:
+## Local hook
 
 ```bash
 # From ci-templates repo
@@ -184,3 +224,19 @@ This will:
 ## License
 
 MIT
+
+cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
+
+## Developing a gate
+
+The scripts are plain Python 3 with no dependencies and run standalone:
+
+```bash
+python3 scripts/gates/loc_clock.py --repo ~/dev/target --ceiling 1500
+python3 scripts/gates/workflow_integrity.py --repo ~/dev/target
+python3 scripts/gates/test_gates.py          # the gates' own fixtures; run before changing one
+```
+
+Exit codes are uniform: `0` pass, `1` breach, `2` the gate could not run. `2` is a
+failure, not a pass — book.md Art. VI.

@@ -1,0 +1,253 @@
+# Constitution Gate — enforces book.md in CI.
+#
+# Reusable. A repository calls it from its own workflow:
+#
+#   jobs:
+#     constitution:
+#       uses: unohee/ci-templates/.github/workflows/constitution-gate.yml@main
+#
+# What this is NOT: language CI. Lint, type-check and tests stay in the per-language
+# workflows (python-ci.yml and friends). This file carries only the checks that are
+# language-agnostic, because the Articles are language-agnostic.
+#
+# CodeQL is deliberately absent. book.md §5.4 scopes it to release, cutover, major
+# refactor and audit requests. Forcing it on every push would contradict the very
+# document this workflow exists to enforce.
+#
+# Every job here is allowed to fail the build. There is no `continue-on-error` and no
+# summary-only job — book.md Art. VI: a gate that cannot fail is not a gate. The workflow
+# this one replaces had seven such constructs and could not go red.
+#
+# There is no `|| true` here either, and no exception mechanism for one. The two this file
+# once needed — a best-effort fetch and a findings exit code that had to survive until the
+# JSON was parsed — moved into `commit_trailers.py --auto` and `cxt_bs.py`, where a
+# non-zero exit is a value the code inspects rather than a status the shell acts on.
+
+name: Constitution Gate (book.md)
+
+on:
+  workflow_call:
+    inputs:
+      loc-ceiling:
+        description: 'Art. III — max code lines per file (blank and comment lines excluded)'
+        required: false
+        type: number
+        default: 1500
+      loc-window-days:
+        description: 'Art. III — days a file may stay over the ceiling before it is a breach'
+        required: false
+        type: number
+        default: 30
+      loc-exclude:
+        description: 'Art. III — extra comma-separated path fragments to skip (generated code, vendored trees)'
+        required: false
+        type: string
+        default: ''
+      architecture-depth:
+        description: 'Art. IV — directory depth treated as "structure" for the freshness check'
+        required: false
+        type: number
+        default: 2
+      cxt-version:
+        description: 'Art. II — pinned @intrect/cxt version. Pinned so a cxt release cannot turn an unrelated PR red.'
+        required: false
+        type: string
+        default: '0.3.0'
+      gates-ref:
+        description: 'ci-templates ref the gate scripts are taken from'
+        required: false
+        type: string
+        default: 'main'
+
+# The gates read history and source; none of them writes back. Declaring the floor here
+# means a future step that needs more has to ask for it instead of inheriting a token.
+permissions:
+  contents: read
+
+env:
+  GATES_DIR: .constitution-gates
+
+jobs:
+  article-iii-loc:
+    name: 'Art. III — LOC ceiling + 30-day clock'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The clock walks back through each oversized file's history to find the commit
+          # that crossed the ceiling. A shallow clone would make every file look as if it
+          # had just crossed, which turns a breach into a warning — fail-open.
+          fetch-depth: 0
+      - uses: actions/checkout@v7
+        with:
+          repository: unohee/ci-templates
+          ref: ${{ inputs.gates-ref }}
+          path: ${{ env.GATES_DIR }}
+      - name: Run gate
+        run: |
+          python3 "$GATES_DIR/scripts/gates/loc_clock.py" \
+            --repo . \
+            --ceiling ${{ inputs.loc-ceiling }} \
+            --window-days ${{ inputs.loc-window-days }} \
+            ${{ inputs.loc-exclude && format('--exclude ''{0}''', inputs.loc-exclude) || '' }} \
+            --github | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+
+  article-iv-architecture:
+    name: 'Art. IV — ARCHITECTURE.md present and current'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The freshness half diffs the base against the head, so both must be present.
+          fetch-depth: 0
+      - uses: actions/checkout@v7
+        with:
+          repository: unohee/ci-templates
+          ref: ${{ inputs.gates-ref }}
+          path: ${{ env.GATES_DIR }}
+      - name: Run gate
+        env:
+          # On a pull request this is the base; on a push it is the previous head, so a
+          # direct-push repository still gets the freshness half. Empty only on a branch's
+          # first push, where the script runs the presence check and says which half ran.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 "$GATES_DIR/scripts/gates/architecture_doc.py" \
+            --repo . \
+            --base-ref "$BASE_SHA" \
+            --head-ref "$HEAD_SHA" \
+            --depth ${{ inputs.architecture-depth }} \
+            --github | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+
+  protocol-55-trailers:
+    name: '§5.5 — no AI co-author trailers'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v7
+        with:
+          repository: unohee/ci-templates
+          ref: ${{ inputs.gates-ref }}
+          path: ${{ env.GATES_DIR }}
+      - name: Run gate
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          python3 "$GATES_DIR/scripts/gates/commit_trailers.py" \
+            --repo . \
+            --auto \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --before "$BEFORE" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --github | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+
+  article-ii-harness:
+    name: 'Art. II — cxt bs (no CRITICAL smells)'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install cxt
+        run: npm install -g "@intrect/cxt@${{ inputs.cxt-version }}"
+      - uses: actions/checkout@v7
+        with:
+          repository: unohee/ci-templates
+          ref: ${{ inputs.gates-ref }}
+          path: ${{ env.GATES_DIR }}
+      - name: Run gate
+        run: |
+          python3 "$GATES_DIR/scripts/gates/cxt_bs.py" \
+            --repo . \
+            --github | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+
+  gate-self-test:
+    name: 'Art. V — the gates’ own fixture tests'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: unohee/ci-templates
+          ref: ${{ inputs.gates-ref }}
+          path: ${{ env.GATES_DIR }}
+      - name: Run fixture tests
+        # book.md §5.2: a test that *is* the gate counts as production code. Every case
+        # here reproduces a defect review found in a gate; if they stop passing, the
+        # gates are wrong and every other job in this file is reporting on a broken ruler.
+        run: python3 "$GATES_DIR/scripts/gates/test_gates.py"
+
+  article-vi-workflow-integrity:
+    name: 'Art. VI — no gate-defeating construct in CI'
+    runs-on: ubuntu-latest
+    steps:
+      # No fetch-depth here: this gate reads the workflow files at HEAD, not history.
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: unohee/ci-templates
+          ref: ${{ inputs.gates-ref }}
+          path: ${{ env.GATES_DIR }}
+      - name: Run gate
+        run: |
+          python3 "$GATES_DIR/scripts/gates/workflow_integrity.py" \
+            --repo . \
+            --github | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
+
+  gate-integrity:
+    name: 'Art. VI — every gate ran and passed'
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - article-iii-loc
+      - article-iv-architecture
+      - protocol-55-trailers
+      - article-ii-harness
+      - article-vi-workflow-integrity
+      - gate-self-test
+    steps:
+      - name: Verify
+        # This job is the difference between a gate and a status board. The workflow it
+        # replaces ended in a job that printed the same table and always exited 0, so a
+        # red gate still produced a green check. Here anything that is not `success` —
+        # failure, cancelled, and skipped alike — fails the build, because book.md Art. VI
+        # says a gate that could not run has not passed.
+        run: |
+          set -uo pipefail
+          fail=0
+          {
+            echo "### Constitution Gate (book.md)"
+            echo ""
+            echo "| Gate | Article | Result |"
+            echo "|------|---------|--------|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          check() {
+            local name="$1" article="$2" result="$3"
+            echo "| $name | $article | $result |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$result" != "success" ]; then
+              echo "::error::gate '$name' did not pass (result: $result). book.md Art. VI — a gate that did not run has not passed."
+              fail=1
+            fi
+          }
+
+          check "LOC ceiling + clock" "Art. III" "${{ needs.article-iii-loc.result }}"
+          check "ARCHITECTURE.md"     "Art. IV"  "${{ needs.article-iv-architecture.result }}"
+          check "commit trailers"     "§5.5"     "${{ needs.protocol-55-trailers.result }}"
+          check "cxt bs"              "Art. II"  "${{ needs.article-ii-harness.result }}"
+          check "workflow integrity"  "Art. VI"  "${{ needs.article-vi-workflow-integrity.result }}"
+          check "gate fixture tests"  "Art. V"   "${{ needs.gate-self-test.result }}"
+
+          exit $fail
