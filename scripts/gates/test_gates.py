@@ -159,6 +159,28 @@ jobs:
             self.assertEqual(code, 1, out)
             self.assertEqual(out.count("BREACH"), 3, out)
 
+    def test_escaped_quotes_and_split_operators(self):
+        """Branch review: a `#` after an escaped quote hid the rest of the line, and an
+        operator split across lines was not joined before scanning."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = new_repo(tmp)
+            write_workflow(repo, "esc.yml", r"""
+jobs:
+  a:
+    steps:
+      - run: echo "foo\" # fake" ; pytest -q || true
+      - run: >
+          bandit -r . ||
+          true
+      - run: |
+          mypy .             || true
+      - run: echo ok   # || true only in a comment
+      - run: pytest -q
+""".lstrip())
+            code, out = run_gate("workflow_integrity.py", "--repo", str(repo))
+            self.assertEqual(code, 1, out)
+            self.assertEqual(out.count("BREACH"), 3, out)
+
     def test_no_workflow_files_is_not_a_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = new_repo(tmp)
@@ -247,6 +269,18 @@ class ArchitectureDoc(unittest.TestCase):
                                  "--base-ref", before, "--head-ref", "HEAD")
             self.assertEqual(code, 1, out)
 
+    def test_a_new_repos_first_push_is_not_an_error(self):
+        """Branch review: GitHub sends forty zeros as `before` on a first push, and
+        `git diff 000...HEAD` is fatal. The gate exited 2 and failed the whole
+        constitution workflow at the moment a repository adopts it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = new_repo(tmp)
+            self._seed(repo)
+            code, out = run_gate("architecture_doc.py", "--repo", str(repo),
+                                 "--base-ref", "0" * 40, "--head-ref", "HEAD")
+            self.assertEqual(code, 0, out)
+            self.assertIn("NOT RUN", out)
+
     def test_same_commit_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = new_repo(tmp)
@@ -259,6 +293,43 @@ class ArchitectureDoc(unittest.TestCase):
             code, out = run_gate("architecture_doc.py", "--repo", str(repo),
                                  "--base-ref", base, "--head-ref", "HEAD")
             self.assertEqual(code, 0, out)
+
+
+class CommitTrailers(unittest.TestCase):
+    """§5.5 — the judgement path itself, which no fixture covered before."""
+
+    @staticmethod
+    def _commit(repo: Path, subject: str, body: str = "") -> None:
+        (repo / "f.txt").write_text(subject, encoding="utf-8")
+        git(repo, "add", "-A")
+        msg = subject if not body else f"{subject}\n\n{body}"
+        git(repo, "commit", "-qm", msg)
+
+    def test_ai_trailer_is_a_breach_and_a_human_name_is_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = new_repo(tmp)
+            self._commit(repo, "clean")
+            base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                                  capture_output=True, text=True).stdout.strip()
+            self._commit(repo, "human co-author",
+                         "Co-Authored-By: Claude Martin <claude.martin@example.com>")
+            code, out = run_gate("commit_trailers.py", "--repo", str(repo),
+                                 "--range", f"{base}..HEAD")
+            self.assertEqual(code, 0, out)
+
+            self._commit(repo, "agent trailer",
+                         "Co-Authored-By: Claude <noreply@anthropic.com>")
+            code, out = run_gate("commit_trailers.py", "--repo", str(repo),
+                                 "--range", f"{base}..HEAD")
+            self.assertEqual(code, 1, out)
+
+    def test_an_empty_range_is_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = new_repo(tmp)
+            self._commit(repo, "only commit")
+            code, _ = run_gate("commit_trailers.py", "--repo", str(repo),
+                               "--range", "HEAD..HEAD")
+            self.assertEqual(code, 2)
 
 
 if __name__ == "__main__":

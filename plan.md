@@ -227,3 +227,32 @@ The self-audit found two things review had not:
 
 Both fixed, both fixtured. `test_gates.py` is 12 cases; every one reproduces a defect that
 shipped in a draft of this change.
+
+## Post-publish branch review (§5.3) — two more, both high
+
+`openswarm pr review --fresh` on `merge-base..head` found two defects the three
+working-tree rounds had not. That is the seam §5.3 exists for, and both were reproduced
+before being accepted.
+
+1. **A new repository's first push failed the gate outright.** GitHub sends `before` as
+   forty zeros, not an empty string, and `git diff 000…HEAD` is fatal rather than empty.
+   `architecture_doc.py` special-cased empty only, so it exited 2 and failed the whole
+   constitution workflow — at exactly the moment a repository adopts it. This was a
+   regression introduced by the round-2 fix for "freshness never runs on push":
+   `commit_trailers.resolve_range` already handled the zeros and the other gate did not.
+   Normalised in the script rather than the workflow, because the same event reaches
+   every gate.
+2. **Two more `workflow_integrity` bypasses.** `code_part()` did not honour backslash
+   escapes, so `echo "foo\" # fake" ; pytest -q || true` looked like it closed its quote
+   at the escape and the executing remainder was cut as a comment. And an operator split
+   across lines — `bandit -r . ||` then `true`, which YAML folds back together — was never
+   joined before scanning. Lines are now folded into logical commands first.
+
+`test_gates.py` is 16 cases. Four are new here, including the two the reviewer noted had
+no coverage at all: `commit_trailers` judging a real AI trailer against a human named
+Claude Martin, and its empty-range fail-closed path.
+
+**The PR's own checks were green while both defects were live.** Six gate jobs passed on
+GitHub Actions against a branch that could not have gated a new repository and could be
+bypassed with an escaped quote. Green CI is a floor (Art. V), and a gate is only as good
+as the last person who tried to get around it.
