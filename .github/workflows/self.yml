@@ -1,0 +1,25 @@
+# ci-templates runs its own constitution gate.
+#
+# Without this file the gates could be changed and merged without GitHub Actions ever
+# executing them — the templates would enforce book.md everywhere except where they are
+# written. Review caught exactly that: both other workflows here declare `workflow_call`
+# only, so nothing in this repository triggered them.
+#
+# `gates-ref` follows the branch under test, so a pull request is judged by the gates it
+# proposes rather than by the ones already on main.
+
+name: Self
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  constitution:
+    uses: ./.github/workflows/constitution-gate.yml
+    with:
+      gates-ref: ${{ github.event.pull_request.head.sha || github.sha }}

@@ -73,18 +73,24 @@ class FakeDataDetector(ast.NodeVisitor):
     """AST 기반 가짜 데이터 패턴 탐지기"""
 
     # 가짜 데이터 생성 패턴
+    #
+    # These are the names this detector looks for, held as dict keys. `cxt bs` reads the
+    # string literals as calls and reports seven CRITICAL fake_data findings against the
+    # detector itself — a scanner cannot tell naming a pattern from using one. The
+    # suppression is scoped to that one category so every other smell still surfaces
+    # (book.md Art. II: disagree with evidence in writing, or fix it).
     FAKE_DATA_PATTERNS = {
         # np.random으로 피처 생성
-        "np.random.rand": "CRITICAL",
-        "np.random.randn": "CRITICAL",
-        "np.random.random": "CRITICAL",
-        "np.random.uniform": "CRITICAL",
-        "np.random.normal": "CRITICAL",
-        "np.random.choice": "WARNING",  # 샘플링은 WARNING
-        "random.random": "CRITICAL",
-        "random.uniform": "CRITICAL",
+        "np.random.rand": "CRITICAL",  # cxt-ignore: fake_data
+        "np.random.randn": "CRITICAL",  # cxt-ignore: fake_data
+        "np.random.random": "CRITICAL",  # cxt-ignore: fake_data
+        "np.random.uniform": "CRITICAL",  # cxt-ignore: fake_data
+        "np.random.normal": "CRITICAL",  # cxt-ignore: fake_data
+        "np.random.choice": "WARNING",  # 샘플링은 WARNING  # cxt-ignore: fake_data
+        "random.random": "CRITICAL",  # cxt-ignore: fake_data
+        "random.uniform": "CRITICAL",  # cxt-ignore: fake_data
         # faker 라이브러리
-        "faker.Faker": "WARNING",
+        "faker.Faker": "WARNING",  # cxt-ignore: fake_data
     }
 
     # 허용된 컨텍스트 (테스트, 시드 설정 등)
