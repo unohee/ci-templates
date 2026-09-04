@@ -331,6 +331,30 @@ class CommitTrailers(unittest.TestCase):
                                "--range", "HEAD..HEAD")
             self.assertEqual(code, 2)
 
+    def test_a_new_repos_first_push_inspects_its_full_history(self):
+        """A repository's first push (intrect-ax, 2026-09-04): `before` was forty zeros and
+        the pushed branch was the default branch itself, so `--auto` resolved
+        `origin/main..HEAD`, which is empty, and the gate exited 2 at the moment the
+        repository adopted it. The range must fall back to the full history — and still
+        judge it, so a trailer on the bootstrap commit is caught."""
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as bare:
+            origin = Path(bare)
+            git(origin, "init", "-q", "--bare", "-b", "main")
+            repo = new_repo(tmp)
+            self._commit(repo, "bootstrap")
+            git(repo, "remote", "add", "origin", str(origin))
+            git(repo, "push", "-q", "origin", "main")
+            auto = ("--auto", "--before", "0" * 40, "--head-sha", "HEAD", "--default-branch", "main")
+            code, out = run_gate("commit_trailers.py", "--repo", str(repo), *auto)
+            self.assertEqual(code, 0, out)
+            self.assertIn("1 inspected", out)
+
+            self._commit(repo, "bootstrap with agent trailer",
+                         "Co-Authored-By: Claude <noreply@anthropic.com>")
+            git(repo, "push", "-q", "origin", "main")
+            code, out = run_gate("commit_trailers.py", "--repo", str(repo), *auto)
+            self.assertEqual(code, 1, out)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
