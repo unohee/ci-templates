@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 GATES = Path(__file__).resolve().parent
 
@@ -35,9 +36,22 @@ def git(cwd: Path, *args: str, when: str | None = None) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, env=env)
 
 
+def init_repo(repo: Path) -> None:
+    """Create a fixture repository with main as its initial branch."""
+    try:
+        git(repo, "init", "-q", "-b", "main")
+    except subprocess.CalledProcessError as exc:
+        # Git before 2.28 does not support `git init -b`. Keep the fixture
+        # branch invariant instead of failing self-hosted Ubuntu 20.04 jobs.
+        if exc.returncode != 129:
+            raise
+        git(repo, "init", "-q")
+        git(repo, "checkout", "-q", "-b", "main")
+
+
 def new_repo(tmp: str) -> Path:
     repo = Path(tmp)
-    git(repo, "init", "-q", "-b", "main")
+    init_repo(repo)
     git(repo, "config", "user.email", "gate@test")
     git(repo, "config", "user.name", "Gate Test")
     return repo
@@ -51,6 +65,18 @@ def write_workflow(repo: Path, name: str, body: str) -> None:
 
 class WorkflowIntegrity(unittest.TestCase):
     """Art. VI — the first draft anchored `|| true` to end of line and leaked."""
+
+    def test_old_git_initializes_main_branch_without_init_dash_b(self):
+        repo = Path("/fixture")
+        unsupported = subprocess.CalledProcessError(129, ["git", "init", "-b", "main"])
+        with mock.patch(f"{__name__}.git", side_effect=[unsupported, None, None]) as invoke:
+            init_repo(repo)
+
+        self.assertEqual(invoke.call_args_list, [
+            mock.call(repo, "init", "-q", "-b", "main"),
+            mock.call(repo, "init", "-q"),
+            mock.call(repo, "checkout", "-q", "-b", "main"),
+        ])
 
     def test_runner_does_not_require_path_is_relative_to(self):
         """Ubuntu 20.04's Python 3.8 has relative_to(), but not is_relative_to()."""
