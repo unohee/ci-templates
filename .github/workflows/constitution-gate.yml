@@ -58,6 +58,11 @@ on:
         required: false
         type: string
         default: 'main'
+      runner-label:
+        description: 'Runner label used by every gate job'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
 
 # The gates read history and source; none of them writes back. Declaring the floor here
 # means a future step that needs more has to ask for it instead of inheriting a token.
@@ -70,7 +75,7 @@ env:
 jobs:
   article-iii-loc:
     name: 'Art. III — LOC ceiling + 30-day clock'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-label }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -95,7 +100,7 @@ jobs:
 
   article-iv-architecture:
     name: 'Art. IV — ARCHITECTURE.md present and current'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-label }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -124,7 +129,7 @@ jobs:
 
   protocol-55-trailers:
     name: '§5.5 — no AI co-author trailers'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-label }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -153,7 +158,7 @@ jobs:
 
   article-ii-harness:
     name: 'Art. II — cxt bs (no CRITICAL smells)'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-label }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -175,7 +180,7 @@ jobs:
 
   gate-self-test:
     name: 'Art. V — the gates’ own fixture tests'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-label }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -190,7 +195,7 @@ jobs:
 
   article-vi-workflow-integrity:
     name: 'Art. VI — no gate-defeating construct in CI'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-label }}
     steps:
       # No fetch-depth here: this gate reads the workflow files at HEAD, not history.
       - uses: actions/checkout@v7
@@ -208,7 +213,7 @@ jobs:
 
   gate-integrity:
     name: 'Art. VI — every gate ran and passed'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-label }}
     if: always()
     needs:
       - article-iii-loc
