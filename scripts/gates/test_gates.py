@@ -332,5 +332,16 @@ class CommitTrailers(unittest.TestCase):
             self.assertEqual(code, 2)
 
 
+class RunnerSelection(unittest.TestCase):
+    """A caller-selected runner must govern every constitution job."""
+
+    def test_every_job_uses_the_configurable_runner_label(self):
+        workflow = GATES.parents[1] / ".github" / "workflows" / "constitution-gate.yml"
+        body = workflow.read_text(encoding="utf-8")
+        self.assertIn("runner-label:", body)
+        self.assertIn("default: 'ubuntu-latest'", body)
+        self.assertEqual(body.count("runs-on: ${{ inputs.runner-label }}"), 7)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

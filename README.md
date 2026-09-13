@@ -37,6 +37,7 @@ Every input is optional:
 | `architecture-depth` | `2` | IV — directory depth treated as "structure" |
 | `cxt-version` | `'0.3.0'` | II — pinned `@intrect/cxt` |
 | `gates-ref` | `'main'` | which ref the gate scripts come from |
+| `runner-label` | `'ubuntu-latest'` | runner label used by every gate job |
 
 ### What it checks
 
