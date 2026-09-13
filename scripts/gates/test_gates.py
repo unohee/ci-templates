@@ -333,7 +333,7 @@ class CommitTrailers(unittest.TestCase):
 
 
 class RunnerSelection(unittest.TestCase):
-    """A caller-selected runner must govern every constitution job."""
+    """A caller-selected runner must govern every reusable workflow job."""
 
     def test_every_job_uses_the_configurable_runner_label(self):
         workflow = GATES.parents[1] / ".github" / "workflows" / "constitution-gate.yml"
@@ -341,6 +341,13 @@ class RunnerSelection(unittest.TestCase):
         self.assertIn("runner-label:", body)
         self.assertIn("default: 'ubuntu-latest'", body)
         self.assertEqual(body.count("runs-on: ${{ inputs.runner-label }}"), 7)
+
+    def test_python_job_uses_the_configurable_runner_label(self):
+        workflow = GATES.parents[1] / ".github" / "workflows" / "python-ci.yml"
+        body = workflow.read_text(encoding="utf-8")
+        self.assertIn("runner-label:", body)
+        self.assertIn('default: "ubuntu-latest"', body)
+        self.assertEqual(body.count("runs-on: ${{ inputs.runner-label }}"), 1)
 
 
 if __name__ == "__main__":
