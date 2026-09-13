@@ -58,21 +58,13 @@ jobs:
   ci:
     uses: unohee/ci-templates/.github/workflows/python-ci.yml@main
     with:
-      src-path: 'src/'
-      test-path: 'tests/unit/'
-      coverage-threshold: 0
-      max-line-count: 800
-      enable-fake-data-check: true
-      feature-patterns: 'feature,program,arbitrage'
-    secrets: inherit
-      test-path: 'tests/'
-      coverage-threshold: 42        # set your measured floor; 0 enforces nothing
+      python-version: "3.12"
+      runner-label: "ubuntu-latest"
 ```
 
-`enforce-types` and `enforce-security` default to `true`. If your repo has not adopted
-typing yet, set `enforce-types: false` **in the caller** — a visible decision. Do not add
-`|| true` to the template; that is the same decision, hidden. Since 2026-08-31 that is not
-merely advice: `article-vi-workflow-integrity` reads your workflow files and fails on it.
+Both inputs are optional. `runner-label` defaults to GitHub-hosted Linux; callers with an
+approved self-hosted runner can select its custom label explicitly. The job installs the
+repository's `.[dev]` extra and runs the complete `pytest -q` suite.
 
 ## Local hook
 

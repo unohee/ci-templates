@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: "3.12"
+      runner-label:
+        description: Runner label used by the pytest job.
+        required: false
+        type: string
+        default: "ubuntu-latest"
 
 permissions:
   contents: read
@@ -15,7 +20,7 @@ permissions:
 jobs:
   pytest:
     name: pytest
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-label }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
