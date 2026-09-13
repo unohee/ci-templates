@@ -179,7 +179,14 @@ def main() -> int:
         except OSError as exc:
             print(f"::error::Art. VI gate could not read {path}: {exc}", file=sys.stderr)
             return 2
-        rel = path.relative_to(args.repo) if path.is_relative_to(args.repo) else path
+        # Constitution callers may deliberately use an older self-hosted distro.
+        # Path.is_relative_to() is Python 3.9+, while relative_to() itself has
+        # existed throughout our Python 3 floor; keep the display-only fallback
+        # from deciding whether the gate can run at all.
+        try:
+            rel = path.relative_to(args.repo)
+        except ValueError:
+            rel = path
         for line_no, name, why, text in breaches:
             total_breaches += 1
             msg = (f"{rel}:{line_no} [{name}] {why} — book.md Art. VI. There is no "

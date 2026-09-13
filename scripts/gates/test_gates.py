@@ -11,6 +11,7 @@ Exit 0 all pass, 1 otherwise. Plain unittest, no dependencies (ARCHITECTURE.md i
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import sys
@@ -50,6 +51,18 @@ def write_workflow(repo: Path, name: str, body: str) -> None:
 
 class WorkflowIntegrity(unittest.TestCase):
     """Art. VI — the first draft anchored `|| true` to end of line and leaked."""
+
+    def test_runner_does_not_require_path_is_relative_to(self):
+        """Ubuntu 20.04's Python 3.8 has relative_to(), but not is_relative_to()."""
+        source = (GATES / "workflow_integrity.py").read_text(encoding="utf-8")
+        calls = [
+            node
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "is_relative_to"
+        ]
+        self.assertEqual(calls, [])
 
     def test_catches_constructs_anywhere_on_the_line(self):
         with tempfile.TemporaryDirectory() as tmp:
