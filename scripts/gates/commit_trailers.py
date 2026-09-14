@@ -64,7 +64,14 @@ def resolve_range(base_sha: str, head_sha: str, before: str,
                                f"origin/{default_branch}"],
                               cwd=cwd, capture_output=True, text=True)
     if resolved.returncode == 0:
-        return f"origin/{default_branch}..{head_sha}"
+        count = subprocess.run(["git", "rev-list", "--count", f"origin/{default_branch}..{head_sha}"],
+                               cwd=cwd, capture_output=True, text=True)
+        if count.returncode == 0 and count.stdout.strip() != "0":
+            return f"origin/{default_branch}..{head_sha}"
+        # The push created the default branch itself, so origin/<default> already points
+        # at head and the range above is empty. Reporting that as "did not run" failed the
+        # gate on a repository's very first push. Full history is the honest range here.
+        print(f"origin/{default_branch} already contains {head_sha}; inspecting full history")
     # A repository's very first push has no default branch to compare against. Inspecting
     # the whole history is a superset, which is safe here; erroring would block the
     # bootstrap commit of every new repo.
