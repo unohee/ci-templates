@@ -14,8 +14,10 @@ from __future__ import annotations
 import ast
 import os
 import subprocess
+import re
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -34,6 +36,19 @@ def git(cwd: Path, *args: str, when: str | None = None) -> None:
     if when:
         env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = when
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, env=env)
+
+
+def days_ago(days: int) -> str:
+    """A git date `days` before the real now, in git's raw `<epoch> <tz>` form.
+
+    Every gate that measures age compares commit dates with `time.time()`, so a fixture
+    that writes an absolute date is correct only on the day it was written. This one
+    committed `2026-08-31` as "today" and went red for every caller on 2026-10-01, when
+    that date became 31 days old — with no change to any gate or caller. Dates are built
+    from the offset the case is about (30-day window, age of the oversized file), never
+    from the calendar.
+    """
+    return f"{int(time.time()) - days * 86400} +0000"
 
 
 def init_repo(repo: Path) -> None:
@@ -249,16 +264,19 @@ class LocClock(unittest.TestCase):
         (repo / name).write_text("\n".join(f"{tag}={i}" for i in range(1800)), encoding="utf-8")
 
     def test_readding_a_path_resets_the_clock(self):
+        """The first add is 90 days old, well past the 30-day window, so a clock that walks
+        through the delete and back to it reports a breach; the re-add is one day old, so
+        a clock that resets at the re-add reports a file on the clock."""
         with tempfile.TemporaryDirectory() as tmp:
             repo = new_repo(tmp)
             self._big(repo, "over.py", "x")
-            git(repo, "add", "-A", when="2026-06-01T10:00:00")
-            git(repo, "commit", "-qm", "big", when="2026-06-01T10:00:00")
+            git(repo, "add", "-A", when=days_ago(90))
+            git(repo, "commit", "-qm", "big", when=days_ago(90))
             git(repo, "rm", "-q", "over.py")
-            git(repo, "commit", "-qm", "delete", when="2026-07-01T10:00:00")
+            git(repo, "commit", "-qm", "delete", when=days_ago(60))
             self._big(repo, "over.py", "y")
-            git(repo, "add", "-A", when="2026-08-31T10:00:00")
-            git(repo, "commit", "-qm", "re-add", when="2026-08-31T10:00:00")
+            git(repo, "add", "-A", when=days_ago(1))
+            git(repo, "commit", "-qm", "re-add", when=days_ago(1))
             code, out = run_gate("loc_clock.py", "--repo", str(repo), "--ceiling", "1500")
             self.assertEqual(code, 0, out)
             self.assertIn("CLOCK", out)
@@ -387,6 +405,34 @@ class RunnerSelection(unittest.TestCase):
         self.assertIn("runner-label:", body)
         self.assertIn('default: "ubuntu-latest"', body)
         self.assertEqual(body.count("runs-on: ${{ inputs.runner-label }}"), 1)
+
+
+class FixtureClock(unittest.TestCase):
+    """A fixture's dates must be offsets from now, not entries in the calendar."""
+
+    def test_no_fixture_writes_an_absolute_date(self):
+        """The age gates compare commit dates with the real clock, so an absolute date in a
+        fixture is a countdown: `2026-08-31` passed for 31 days and then failed every
+        caller's PR gate without any change to a gate. Docstrings are prose and skipped."""
+        tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        prose = {
+            id(node.body[0].value)
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef))
+            and node.body
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+        }
+        calendar = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
+        offenders = [
+            f"line {node.lineno}: {node.value!r}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in prose
+            and calendar.search(node.value)
+        ]
+        self.assertEqual(offenders, [], "use days_ago(n) instead of a calendar date")
 
 
 if __name__ == "__main__":
