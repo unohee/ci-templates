@@ -14,6 +14,9 @@ as `§5.5`.
 |---|---|
 | `.github/workflows/constitution-gate.yml` | **Language-agnostic** enforcement of book.md. The one every repo should call. |
 | `.github/workflows/python-ci.yml` | Python lint / test / type / LOC. Language CI only. |
+| `.github/workflows/rust-ci.yml` | Rust **tests on the merge result**, one job. Deliberately no fmt / clippy / audit (book.md Part III.2: a hook or the release gate already ran them). |
+| `scripts/ci_changes.py` | The path classifier `rust-ci.yml` uses to skip tests for changes that cannot affect them. An allowlist: anything unlisted, empty or unknown runs the tests. |
+| `scripts/test_ci_changes.py` | Fixture and wiring tests for the classifier and for `rust-ci.yml`'s shape, run by `self.yml`. |
 | `scripts/gates/` | The gate implementations the constitution workflow runs. Plain Python 3, no dependencies. |
 | `.github/workflows/self.yml` | This repository calling its own constitution gate on push and PR. Without it the gates could change without ever running. |
 | `scripts/gates/test_gates.py` | Fixture tests for the gates. Every case reproduces a defect review found in a first draft; §5.2 treats a test that *is* the gate as production code. |
@@ -89,5 +92,15 @@ python3 scripts/gates/test_gates.py
 - **The AI-trailer gate deliberately ignores `@users.noreply.github.com`.** Humans use
   that address; matching it blocked legitimate PRs. Only vendor addresses and bracketed
   bot handles are matched.
+- **A green `rust-ci.yml` is not "tested" when the classifier skipped.** A pull request that
+  touches only the caller's `skip-paths` gets a green job whose summary says the tests did
+  not run. `skip-paths` defaults to empty on purpose: `*.md` looks safe until a crate does
+  `#![doc = include_str!("../README.md")]` and the README is a doctest input.
+- **`rust-ci.yml` resolves floating dependencies when the caller gitignores `Cargo.lock`.**
+  It runs `cargo generate-lockfile` then, so an upstream release can turn an unrelated pull
+  request red. That is the caller's choice to make by committing the lockfile.
+- **File names are attacker-chosen input.** `ci_changes.py` escapes them before printing
+  into `$GITHUB_OUTPUT` and prints its verdict last; a newline plus `heavy=false` in a file
+  name must not become a second output line. A test pins both.
 - **`python-ci.yml` is now able to fail.** A repository that passed it before 2026-08-30
   passed nothing. Expect first red runs to be real findings, not regressions.

@@ -1,0 +1,198 @@
+# Rust CI — the tests, on the merge result. Reusable.
+#
+# A repository calls it from its own workflow:
+#
+#   on:
+#     pull_request:
+#     workflow_dispatch:
+#   jobs:
+#     test:
+#       uses: unohee/ci-templates/.github/workflows/rust-ci.yml@main
+#       with:
+#         packages: my-crate
+#
+# What this is: the one job book.md Part III.2 leaves to a pull request — the tests on the
+# merged tree (the change combined with whatever else landed), which no hook on a single
+# branch can see. `pull_request` checks out that merge commit, which is why the caller
+# triggers on it and not on a branch push.
+#
+# What this is NOT: fmt, clippy, cargo-audit. fmt and lint are checks a hook can run on the
+# staged files, and audit belongs to the release gate; running either on every pull request
+# pays twice for a verdict that was already reached (Part III.2, amended 2026-10-04). The
+# language-agnostic checks (LOC, ARCHITECTURE.md, trailers) are in constitution-gate.yml.
+#
+# One job, one step per concern. Separate jobs would each bill a rounded-up minute for
+# seconds of work (AGT-4747: 70% of a caller's minutes were rounding). A change that touches
+# only paths the caller declared skippable still gets a green job — with a summary that says
+# the tests did not run and why, so green is never read as "tested".
+#
+# There is no `continue-on-error` and no `|| true` here, and no exception mechanism for one
+# (book.md Art. VI, enforced by workflow_integrity.py). A caller that does not want a check
+# turns it off with a declared input, which is visible in the caller.
+
+name: Rust tests (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      packages:
+        description: 'Space-separated cargo package names, each tested with -p. Empty tests the whole workspace.'
+        required: false
+        type: string
+        default: ''
+      setup-script:
+        description: 'Path, relative to the caller repository, of a script run before the tests (stage fixtures, trim workspace members). Its exit code is the verdict: non-zero fails the job.'
+        required: false
+        type: string
+        default: ''
+      test-profile:
+        description: 'Cargo profile for the tests. dev is what a plain test run uses; a caller whose tests are slow unoptimised can name an optimised profile that inherits dev.'
+        required: false
+        type: string
+        default: 'dev'
+      skip-paths:
+        description: 'Newline-separated globs for paths that cannot affect the build or the tests. A pull request touching only these skips the tests. Empty (the default) skips nothing. List only paths you have checked are not build inputs (include_str!, build.rs, fixtures, doc includes).'
+        required: false
+        type: string
+        default: ''
+      toolchain:
+        description: 'Rust toolchain: stable, beta, nightly or a version such as 1.96.0.'
+        required: false
+        type: string
+        default: 'stable'
+      scope-note:
+        description: 'One line saying what this run does NOT cover, printed in the job summary so a green run is not read as a statement about the whole repository.'
+        required: false
+        type: string
+        default: ''
+      scripts-ref:
+        description: 'ci-templates ref the classifier script is taken from. Pin it to the same ref as the workflow when the workflow itself is pinned.'
+        required: false
+        type: string
+        default: 'main'
+      runner-label:
+        description: 'Runner label for the job'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      timeout-minutes:
+        description: 'Job timeout. A hung test would otherwise bill the 360-minute default.'
+        required: false
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  test:
+    name: 'Rust tests (merge result)'
+    runs-on: ${{ inputs.runner-label }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The classifier diffs the merge commit against its first parent, the base.
+          # Depth 2 holds both; a full clone would only cost time.
+          fetch-depth: 2
+      - uses: actions/checkout@v7
+        with:
+          repository: unohee/ci-templates
+          ref: ${{ inputs.scripts-ref }}
+          path: .ci-templates
+
+      - name: Classify the change
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          SKIP_PATHS: ${{ inputs.skip-paths }}
+        # A failure here fails the job: a change that could not be classified is not a
+        # change that may be skipped.
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" != "pull_request" ]; then
+            {
+              echo "reason=event '$EVENT' has no diff to classify: running everything"
+              echo "heavy=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only -z HEAD^1 HEAD > "$RUNNER_TEMP/changed.z"
+          python3 -I .ci-templates/scripts/ci_changes.py --null --skip "$SKIP_PATHS" \
+            < "$RUNNER_TEMP/changed.z" >> "$GITHUB_OUTPUT"
+
+      - name: Install the Rust toolchain
+        if: steps.classify.outputs.heavy == 'true'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Prepare the checkout
+        if: steps.classify.outputs.heavy == 'true' && inputs.setup-script != ''
+        env:
+          SETUP_SCRIPT: ${{ inputs.setup-script }}
+        run: bash "$SETUP_SCRIPT"
+
+      # Before the cache step: its key hashes the lockfile, so the lockfile has to exist.
+      - name: Resolve dependencies
+        if: steps.classify.outputs.heavy == 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -f Cargo.lock ]; then
+            cargo generate-lockfile
+          fi
+
+      - name: Cache build artifacts
+        if: steps.classify.outputs.heavy == 'true'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        id: tests
+        if: steps.classify.outputs.heavy == 'true'
+        env:
+          PACKAGES: ${{ inputs.packages }}
+          PROFILE: ${{ inputs.test-profile }}
+        run: |
+          set -euo pipefail
+          set -f
+          args=(--no-fail-fast)
+          if [ -n "$PACKAGES" ]; then
+            for pkg in $PACKAGES; do args+=(-p "$pkg"); done
+          else
+            args+=(--workspace)
+          fi
+          if [ "$PROFILE" != "dev" ]; then
+            args+=(--profile "$PROFILE")
+          fi
+          cargo test "${args[@]}"
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        env:
+          HEAVY: ${{ steps.classify.outputs.heavy }}
+          REASON: ${{ steps.classify.outputs.reason }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+          PACKAGES: ${{ inputs.packages }}
+          PROFILE: ${{ inputs.test-profile }}
+          SCOPE_NOTE: ${{ inputs.scope-note }}
+        run: |
+          {
+            echo "### Rust tests (merge result)"
+            echo ""
+            if [ -z "$HEAVY" ]; then
+              echo "- **The change was not classified**, so nothing here says the tests passed."
+            elif [ "$HEAVY" = "true" ]; then
+              echo "- Ran with profile \`$PROFILE\` on: \`${PACKAGES:-the whole workspace}\` (test step: $TEST_OUTCOME)"
+              echo "- Why: $REASON"
+            else
+              echo "- **The tests did not run.** $REASON"
+              echo "- Only paths the caller declared skippable changed (\`skip-paths\`)."
+            fi
+            if [ -n "$SCOPE_NOTE" ]; then
+              echo "- **Not covered by this run:** $SCOPE_NOTE"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

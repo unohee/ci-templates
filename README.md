@@ -2,7 +2,7 @@
 
 # ci-templates
 
-Reusable CI for the organisation: **constitution gate** enforcing [`book.md`](https://github.com/unohee/dev_runbook/blob/main/book.md), Python CI, and **fake data detection**.
+Reusable CI for the organisation: **constitution gate** enforcing [`book.md`](https://github.com/unohee/dev_runbook/blob/main/book.md), Python CI, Rust CI, and **fake data detection**.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the layout and the traps.
 
@@ -69,6 +69,46 @@ jobs:
 Both inputs are optional. `runner-label` defaults to GitHub-hosted Linux; callers with an
 approved self-hosted runner can select its custom label explicitly. The job installs the
 repository's `.[dev]` extra and runs the complete `pytest -q` suite.
+
+## Rust CI — Rust repositories
+
+The tests, on the merge result. Trigger it on `pull_request` (which checks out the merge
+commit) and `workflow_dispatch`, not on branch pushes:
+
+```yaml
+jobs:
+  test:
+    uses: unohee/ci-templates/.github/workflows/rust-ci.yml@main
+    with:
+      packages: my-crate
+      test-profile: ci-test
+      skip-paths: |
+        *.md
+        docs/*
+```
+
+Every input is optional:
+
+| Input | Default | Meaning |
+|---|---|---|
+| `packages` | `''` | Space-separated package names, each `-p`. Empty tests the whole workspace. |
+| `setup-script` | `''` | Script in the caller repository run first (stage fixtures, trim workspace members). Its exit code is the verdict. |
+| `test-profile` | `'dev'` | Cargo profile. Name an optimised profile that inherits `dev` if unoptimised DSP/ML tests are slow. |
+| `skip-paths` | `''` | Newline-separated globs for paths that cannot affect the build. Empty skips nothing. |
+| `toolchain` | `'stable'` | `stable`, `beta`, `nightly` or a version. |
+| `scope-note` | `''` | One line on what the run does **not** cover; printed in the summary. |
+| `scripts-ref` | `'main'` | ref the classifier script is taken from; pin it with the workflow. |
+| `runner-label` | `'ubuntu-latest'` | runner label |
+| `timeout-minutes` | `30` | job timeout |
+
+It is one job on purpose and it does **not** run fmt, clippy or cargo-audit: a hook can run
+fmt and lint on the staged files, and audit belongs to the release gate, so a pull request
+would pay twice for the same verdict (book.md Part III.2). If `Cargo.lock` is not committed
+it runs `cargo generate-lockfile` first.
+
+A pull request that touches only `skip-paths` still gets a green job; its summary says the
+tests did not run. A change the classifier cannot read, an empty diff and any path not
+matched by a glob all run the tests.
 
 ## Local hook
 
