@@ -13,6 +13,14 @@ on:
         required: false
         type: string
         default: "ubuntu-latest"
+      timeout-minutes:
+        description: >-
+          Minutes before the pytest job is killed. Without a limit a hung test bills the
+          360-minute default. The slowest caller measured so far (2026-10-16) needs 3.2
+          minutes, so the default leaves room for a cold pip cache and nothing more.
+        required: false
+        type: number
+        default: 30
 
 permissions:
   contents: read
@@ -21,6 +29,7 @@ jobs:
   pytest:
     name: pytest
     runs-on: ${{ inputs.runner-label }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

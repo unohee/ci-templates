@@ -256,3 +256,63 @@ Claude Martin, and its empty-range fail-closed path.
 GitHub Actions against a branch that could not have gated a new repository and could be
 bypassed with an escaped quote. Green CI is a floor (Art. V), and a gate is only as good
 as the last person who tried to get around it.
+
+---
+
+# Plan — stop billing for waste in the callers' CI (AGT-4747, 2026-10-16)
+
+PR #9 already folded the seven constitution jobs into one (vega-cli: 7.0 of 9.9 billed
+minutes per run was rounding). This plan covers what #9 left, found by applying the
+`/setup-cicd` cost defaults to this repository and its callers.
+
+## Measured (30 days to 2026-10-16, per-job minutes rounded up, Linux x1)
+
+| caller | workflow | runs | billed min/run |
+|---|---|---|---|
+| vega-cli (private) | constitution | 38 | 7.0 (before #9) |
+| vega-cli (private) | python-ci | 38 | 2.0 |
+| audioman (public) | python-ci | 14 | 8.3 — its own `coverage` job reruns the suite `pytest` already ran |
+
+`cost-linux` (intrect-ax) was counted as self-hosted, i.e. free, from the label alone.
+
+## Changes
+
+1. `python-ci.yml`: `timeout-minutes` input, default 30. The slowest caller needs 3.2.
+2. `self.yml` and the README caller example: a push triggers on `main` only, and
+   `concurrency` cancels a pull request but gives a push a group per commit.
+3. `ARCHITECTURE.md` invariant 5 and `WasteGuards` in `test_gates.py`.
+
+## Why not the stock `/setup-cicd` concurrency block
+
+Its `cancel-in-progress: !startsWith(ref, 'refs/tags/')` cancels a push to `main`, and
+`cancel-in-progress: false` does not fix that: a group keeps one running and one pending
+run, and a newer push replaces the pending one. The push gates judge `before..head`, so a
+cancelled or replaced push leaves its own commits checked by nothing. That is Art. VI's
+"a gate that did not run". A pull request is safe to cancel because its range is
+`base..head`, which the newer run covers whole.
+
+## Rejected
+
+- **A `changes` path-gate job.** A job bills at least one minute, so skipping a run of cost C
+  with probability p only pays when p·C > 1. With C of about 1 (gate) to 4 (pytest) and p of
+  about 0.25 it never does.
+- **Dropping `gate-self-test` from callers.** After #9 it is seconds inside a minute that is
+  billed anyway; the saving is zero and the Art. V coverage is gone.
+- **`node-ci.yml`.** Untracked here and owned by AGT-3880. `WasteGuards` globs every
+  workflow, so it will ask for a timeout the day that file is committed.
+
+## Left to the owners, not migrated here (CLAUDE.md §5)
+
+Callers that cancel every ref (intrect-ax, audioman, better-fakeprint, suno-cli); callers with
+no concurrency at all (supercollider-cli, cxt, okpos-cli); okpos-cli passing inputs that
+`python-ci.yml` no longer declares; audioman's duplicate coverage run. Reported in AGT-4747.
+
+## Verification
+
+`test_gates.py` 28 cases green; the other three gates exit 0; actionlint 1.7.12 reports 0
+errors (without shellcheck, so `run:` scripts were not shell-linted). Each guard was shown
+to fail: seven mutated copies (timeout deleted, `feature/**` push restored, cancel-everything
+in `self.yml` and in the README, sha branch removed from both groups, a new workflow with no
+timeout) each failed the intended test, and the unmutated copy passed.
+Not verified here: a push event's group expression, which a pull request cannot exercise.
+The first run on `main` after the merge is the check.

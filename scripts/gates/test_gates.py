@@ -449,6 +449,112 @@ class OneGateJob(unittest.TestCase):
         self.assertIn("exit $fail", integrity)
 
 
+class WasteGuards(unittest.TestCase):
+    """Billing waste, kept out by shape (AGT-4747).
+
+    CI minutes are billed per job, rounded up, so the waste is structural: a hung job with
+    no timeout, and a duplicate run of the same commit. Each guard checks the *shape* of
+    the workflow or the README, never its exact wording. This suite runs on every caller's
+    CI and ci-templates' main has no branch protection, so a test that broke on a reworded
+    sentence would turn every caller red. Each guard also refuses to pass when its parser
+    found nothing, so a changed file layout cannot make it vacuous.
+    """
+
+    WORKFLOWS = GATES.parents[1] / ".github" / "workflows"
+    README = GATES.parents[1] / "README.md"
+
+    @staticmethod
+    def _jobs(body):
+        """Map job id -> the lines of its block.
+
+        Text parsing on purpose: gate scripts depend on nothing but Python 3 (invariant 3)
+        and PyYAML is not guaranteed on a caller's runner. Job ids sit at two spaces and
+        job keys at four, which is what every workflow here uses.
+        """
+        lines = body.splitlines()
+        start = next((i for i, ln in enumerate(lines) if ln.rstrip() == "jobs:"), None)
+        if start is None:
+            return {}
+        jobs, current = {}, None
+        for ln in lines[start + 1:]:
+            if not ln.strip() or ln.lstrip().startswith("#"):
+                if current is not None:
+                    jobs[current].append(ln)
+                continue
+            if not ln.startswith(" "):
+                break  # the next top-level key ends the jobs block
+            match = re.match(r"^  ([A-Za-z0-9_-]+):\s*(#.*)?$", ln)
+            if match:
+                current = match.group(1)
+                jobs[current] = []
+            elif current is not None:
+                jobs[current].append(ln)
+        return jobs
+
+    @staticmethod
+    def _has_job_key(lines, key):
+        return any(re.match(r"^    " + re.escape(key) + r":", ln) for ln in lines)
+
+    @staticmethod
+    def _value(body, key):
+        match = re.search(r"^\s*" + re.escape(key) + r":\s*(.+?)\s*$", body, re.MULTILINE)
+        return match.group(1) if match else ""
+
+    def _assert_pr_only_cancel(self, body, where):
+        """Only a pull request may be cancelled; a push must get a group of its own."""
+        group = self._value(body, "group")
+        cancel = self._value(body, "cancel-in-progress")
+        self.assertIn("github.event_name", group, f"{where}: group must branch on the event")
+        self.assertIn("github.sha", group, f"{where}: a push needs a group per commit")
+        self.assertIn("github.event_name", cancel, f"{where}: cancel must depend on the event")
+        self.assertIn("pull_request", cancel, f"{where}: only pull requests are cancelled")
+
+    def test_every_job_has_a_timeout_unless_it_only_calls_a_workflow(self):
+        workflows = sorted(self.WORKFLOWS.glob("*.yml"))
+        self.assertTrue(workflows, "no workflow files found")
+        for workflow in workflows:
+            body = workflow.read_text(encoding="utf-8")
+            jobs = self._jobs(body)
+            self.assertTrue(jobs, f"{workflow.name}: parsed no jobs")
+            own = {name: lines for name, lines in jobs.items()
+                   if not self._has_job_key(lines, "uses")}
+            # A job that calls a reusable workflow cannot carry timeout-minutes; its callee does.
+            runs_on = len(re.findall(r"^    runs-on:", body, re.MULTILINE))
+            self.assertEqual(runs_on, len(own),
+                             f"{workflow.name}: {runs_on} runs-on lines but {len(own)} jobs "
+                             "parsed, so the parser lost track of a job")
+            for name, lines in own.items():
+                self.assertTrue(self._has_job_key(lines, "timeout-minutes"),
+                                f"{workflow.name}: job '{name}' has no timeout-minutes")
+
+    def test_python_ci_timeout_is_an_input_with_a_default(self):
+        body = (self.WORKFLOWS / "python-ci.yml").read_text(encoding="utf-8")
+        self.assertIn("timeout-minutes: ${{ inputs.timeout-minutes }}", body)
+        self.assertRegex(body, r"(?s)\n      timeout-minutes:.*?default:\s*\d+\s*\n")
+
+    def test_the_self_workflow_cancels_only_pull_requests(self):
+        body = (self.WORKFLOWS / "self.yml").read_text(encoding="utf-8")
+        self._assert_pr_only_cancel(body, "self.yml")
+
+    def test_readme_callers_do_not_run_every_commit_twice(self):
+        blocks = re.findall(r"```yaml\n(.*?)```", self.README.read_text(encoding="utf-8"),
+                            re.DOTALL)
+        callers = [b for b in blocks if "unohee/ci-templates/.github/workflows/" in b]
+        self.assertTrue(callers, "README has no caller example")
+        whole_files = 0
+        for block in callers:
+            if re.search(r"^\s*push:", block, re.MULTILINE):
+                match = re.search(r"push:\s*\n\s*branches:\s*\[([^\]]*)\]", block)
+                self.assertIsNotNone(match, "a caller's push trigger must name its branches")
+                branches = [b.strip(" '\"") for b in match.group(1).split(",")]
+                # feature/** and fix/** pushes arrive with a pull request that runs them again.
+                self.assertEqual(branches, ["main"], "push must be limited to main")
+            if re.search(r"^on:", block, re.MULTILINE):
+                whole_files += 1
+                self._assert_pr_only_cancel(block, "README caller")
+        self.assertGreaterEqual(whole_files, 1, "no README caller shows its `on:` block")
+
+
 class FixtureClock(unittest.TestCase):
     """A fixture's dates must be offsets from now, not entries in the calendar."""
 

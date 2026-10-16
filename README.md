@@ -18,14 +18,39 @@ name: constitution
 
 on:
   push:
-    branches: [main, develop, 'feature/**', 'fix/**', 'ci/**', 'chore/**']
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only a pull request is cancelled when a newer commit arrives. A push gets a group of its
+# own: a shared group keeps one running and ONE pending run, and a newer push replaces the
+# pending one, so the replaced push's commits would never be checked.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   gate:
     uses: unohee/ci-templates/.github/workflows/constitution-gate.yml@main
 ```
+
+**Why these triggers.** Billing is per job, rounded up to the minute, so a duplicate run is
+the waste to avoid, not the gate itself.
+
+- Do not list `feature/**`, `fix/**` and similar branches under `push`. Those pushes arrive
+  with a pull request, which runs the same commit again.
+- `push: [main]` plus `pull_request` gates every commit that lands on `main`, a direct push
+  included, and a direct push bills a run (vega-cli, 2026-09-18: 23 direct pushes in one day,
+  265 weighted minutes).
+- A repository that enforces pull requests through branch protection can drop `push`. One
+  without protection should keep it: a direct push the gate never sees is a gate that did
+  not run, which book.md Art. VI does not count as a pass.
+- The concurrency block is the caller's to own. A reusable workflow cannot set it for the
+  caller: inside one, `github.workflow` is the caller's name, so the group would collide with
+  the caller's own.
 
 Every input is optional:
 
@@ -64,11 +89,14 @@ jobs:
     with:
       python-version: "3.12"
       runner-label: "ubuntu-latest"
+      timeout-minutes: 30
 ```
 
-Both inputs are optional. `runner-label` defaults to GitHub-hosted Linux; callers with an
-approved self-hosted runner can select its custom label explicitly. The job installs the
-repository's `.[dev]` extra and runs the complete `pytest -q` suite.
+All three inputs are optional. `runner-label` defaults to GitHub-hosted Linux; callers with an
+approved self-hosted runner can select its custom label explicitly. `timeout-minutes`
+defaults to 30 and exists so a hung test cannot bill the 360-minute default. The job installs
+the repository's `.[dev]` extra and runs the complete `pytest -q` suite. Give this caller the
+same `on:` and `concurrency:` blocks as the constitution caller above.
 
 ## Rust CI — Rust repositories
 

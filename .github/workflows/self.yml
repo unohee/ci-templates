@@ -18,6 +18,15 @@ on:
 permissions:
   contents: read
 
+# Only a pull request is cancelled when a newer commit arrives: its run reads base..head,
+# so the newer run sees everything the older one did. A push is judged on before..head, and
+# a concurrency group keeps one running and ONE pending run — a newer push replaces the
+# pending one, so its before..head range would never be checked by anything. Pushes
+# therefore get a group per commit and never wait on, or replace, each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   constitution:
     uses: ./.github/workflows/constitution-gate.yml

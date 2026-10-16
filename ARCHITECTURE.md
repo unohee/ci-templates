@@ -66,6 +66,16 @@ python3 scripts/gates/test_gates.py
    bandit via `lint-versions`. A hard gate turns an upstream release into a red CI on an
    unrelated PR; bump deliberately. This invariant was asserted before it was true: the
    lint toolchain installed unpinned until 2026-08-31.
+5. **Every job has a timeout, and concurrency belongs to the caller.** A hung job with no
+   `timeout-minutes` bills the 360-minute default, so `test_gates.py` fails any job in
+   `.github/workflows/` that neither sets one nor is a reusable-workflow call. A reusable
+   workflow cannot set concurrency for its caller (inside one, `github.workflow` is the
+   caller's name), so the README gives the shape and `self.yml` uses it: only a pull request
+   is cancelled by a newer commit, and a push gets a group per commit. A shared group keeps
+   one running and one pending run, and a newer push replaces the pending one; the gates
+   judge a push on `before..head`, so the replaced push's commits would be checked by
+   nothing. That is a gate that did not run (Art. VI), and `cancel-in-progress: false` does
+   not prevent it.
 
 ## What will bite you
 
