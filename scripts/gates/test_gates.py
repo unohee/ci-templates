@@ -397,7 +397,9 @@ class RunnerSelection(unittest.TestCase):
         body = workflow.read_text(encoding="utf-8")
         self.assertIn("runner-label:", body)
         self.assertIn("default: 'ubuntu-latest'", body)
-        self.assertEqual(body.count("runs-on: ${{ inputs.runner-label }}"), 7)
+        # Every runs-on line, however many jobs there are, takes the caller's label.
+        self.assertGreaterEqual(body.count("runs-on:"), 1)
+        self.assertEqual(body.count("runs-on:"), body.count("runs-on: ${{ inputs.runner-label }}"))
 
     def test_python_job_uses_the_configurable_runner_label(self):
         workflow = GATES.parents[1] / ".github" / "workflows" / "python-ci.yml"
@@ -405,6 +407,46 @@ class RunnerSelection(unittest.TestCase):
         self.assertIn("runner-label:", body)
         self.assertIn('default: "ubuntu-latest"', body)
         self.assertEqual(body.count("runs-on: ${{ inputs.runner-label }}"), 1)
+
+
+class OneGateJob(unittest.TestCase):
+    """The gates run as steps of one job (AGT-4747), so their wiring is checked here.
+
+    Seven jobs billed a minute each for checks that take seconds. As steps, two things
+    can silently break that jobs gave for free: a failed gate stopping the gates after it,
+    and the integrity step not looking at a gate that was added later.
+    """
+
+    def _steps(self):
+        workflow = GATES.parents[1] / ".github" / "workflows" / "constitution-gate.yml"
+        body = workflow.read_text(encoding="utf-8")
+        jobs = body[body.index("\njobs:\n"):]
+        chunks = jobs.split("\n      - ")[1:]
+        return body, jobs, chunks
+
+    def test_there_is_one_job(self):
+        _, jobs, _ = self._steps()
+        top = [ln for ln in jobs.splitlines() if ln.startswith("  ") and not ln.startswith("   ")
+               and ln.rstrip().endswith(":")]
+        self.assertEqual(top, ["  gate:"])
+
+    def test_every_gate_step_runs_after_an_earlier_failure_and_is_checked(self):
+        _, _, chunks = self._steps()
+        gates = [c for c in chunks if "\n        id: " in c]
+        self.assertEqual(len(gates), 6, "six gates, each a step with an id")
+        integrity = chunks[-1]
+        self.assertIn("every gate ran and passed", integrity)
+        self.assertIn("if: ${{ !cancelled() }}", integrity)
+        for gate in gates:
+            step_id = gate.split("\n        id: ")[1].split("\n")[0].strip()
+            self.assertIn("if: ${{ !cancelled() }}", gate, step_id)
+            self.assertIn(f"steps.{step_id}.outcome", integrity, step_id)
+
+    def test_the_integrity_step_fails_on_anything_but_success(self):
+        _, _, chunks = self._steps()
+        integrity = chunks[-1]
+        self.assertIn('if [ "$result" != "success" ]', integrity)
+        self.assertIn("exit $fail", integrity)
 
 
 class FixtureClock(unittest.TestCase):
