@@ -14,9 +14,16 @@
 # refactor and audit requests. Forcing it on every push would contradict the very
 # document this workflow exists to enforce.
 #
-# Every job here is allowed to fail the build. There is no `continue-on-error` and no
-# summary-only job — book.md Art. VI: a gate that cannot fail is not a gate. The workflow
+# Every gate here is allowed to fail the build. There is no `continue-on-error` and no
+# summary-only step — book.md Art. VI: a gate that cannot fail is not a gate. The workflow
 # this one replaces had seven such constructs and could not go red.
+#
+# One job, one step per gate. The gates used to be seven jobs, each finishing in 5-13 s
+# and each billed as a full minute, so 70% of a caller's CI minutes were rounding
+# (vega-cli, 30 days to 2026-10-16: 7.0 of 9.9 billed minutes per run). Each gate step
+# runs `if: !cancelled()`, so a red gate does not hide the ones after it, and any failed
+# step still fails the job. The last step reports every gate's outcome and fails on
+# anything that is not `success`, which is what the separate `gate-integrity` job did.
 #
 # There is no `|| true` here either, and no exception mechanism for one. The two this file
 # once needed — a best-effort fetch and a findings exit code that had to survive until the
@@ -59,7 +66,7 @@ on:
         type: string
         default: 'main'
       runner-label:
-        description: 'Runner label used by every gate job'
+        description: 'Runner label for the gate job'
         required: false
         type: string
         default: 'ubuntu-latest'
@@ -73,14 +80,18 @@ env:
   GATES_DIR: .constitution-gates
 
 jobs:
-  article-iii-loc:
-    name: 'Art. III — LOC ceiling + 30-day clock'
+  gate:
+    name: 'Constitution Gate (book.md)'
     runs-on: ${{ inputs.runner-label }}
+    # The slowest gate (cxt bs, with its npm install) took 13 s; ten minutes is room for
+    # a cold npm cache without letting a hang bill the 360-minute default.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
-          # The clock walks back through each oversized file's history to find the commit
-          # that crossed the ceiling. A shallow clone would make every file look as if it
+          # Art. III walks back through each oversized file's history to find the commit
+          # that crossed the ceiling; Art. IV diffs base against head; §5.5 reads the
+          # commit range. A shallow clone would make every oversized file look as if it
           # had just crossed, which turns a breach into a warning — fail-open.
           fetch-depth: 0
       - uses: actions/checkout@v7
@@ -88,7 +99,15 @@ jobs:
           repository: unohee/ci-templates
           ref: ${{ inputs.gates-ref }}
           path: ${{ env.GATES_DIR }}
-      - name: Run gate
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install cxt
+        run: npm install -g "@intrect/cxt@${{ inputs.cxt-version }}"
+
+      - name: 'Art. III — LOC ceiling + 30-day clock'
+        id: article_iii_loc
+        if: ${{ !cancelled() }}
         run: |
           python3 "$GATES_DIR/scripts/gates/loc_clock.py" \
             --repo . \
@@ -98,20 +117,9 @@ jobs:
             --github | tee -a "$GITHUB_STEP_SUMMARY"
           exit "${PIPESTATUS[0]}"
 
-  article-iv-architecture:
-    name: 'Art. IV — ARCHITECTURE.md present and current'
-    runs-on: ${{ inputs.runner-label }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          # The freshness half diffs the base against the head, so both must be present.
-          fetch-depth: 0
-      - uses: actions/checkout@v7
-        with:
-          repository: unohee/ci-templates
-          ref: ${{ inputs.gates-ref }}
-          path: ${{ env.GATES_DIR }}
-      - name: Run gate
+      - name: 'Art. IV — ARCHITECTURE.md present and current'
+        id: article_iv_architecture
+        if: ${{ !cancelled() }}
         env:
           # On a pull request this is the base; on a push it is the previous head, so a
           # direct-push repository still gets the freshness half. Empty only on a branch's
@@ -127,19 +135,9 @@ jobs:
             --github | tee -a "$GITHUB_STEP_SUMMARY"
           exit "${PIPESTATUS[0]}"
 
-  protocol-55-trailers:
-    name: '§5.5 — no AI co-author trailers'
-    runs-on: ${{ inputs.runner-label }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - uses: actions/checkout@v7
-        with:
-          repository: unohee/ci-templates
-          ref: ${{ inputs.gates-ref }}
-          path: ${{ env.GATES_DIR }}
-      - name: Run gate
+      - name: '§5.5 — no AI co-author trailers'
+        id: protocol_55_trailers
+        if: ${{ !cancelled() }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -156,79 +154,48 @@ jobs:
             --github | tee -a "$GITHUB_STEP_SUMMARY"
           exit "${PIPESTATUS[0]}"
 
-  article-ii-harness:
-    name: 'Art. II — cxt bs (no CRITICAL smells)'
-    runs-on: ${{ inputs.runner-label }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-      - name: Install cxt
-        run: npm install -g "@intrect/cxt@${{ inputs.cxt-version }}"
-      - uses: actions/checkout@v7
-        with:
-          repository: unohee/ci-templates
-          ref: ${{ inputs.gates-ref }}
-          path: ${{ env.GATES_DIR }}
-      - name: Run gate
+      - name: 'Art. II — cxt bs (no CRITICAL smells)'
+        id: article_ii_harness
+        if: ${{ !cancelled() }}
         run: |
           python3 "$GATES_DIR/scripts/gates/cxt_bs.py" \
             --repo . \
             --github | tee -a "$GITHUB_STEP_SUMMARY"
           exit "${PIPESTATUS[0]}"
 
-  gate-self-test:
-    name: 'Art. V — the gates’ own fixture tests'
-    runs-on: ${{ inputs.runner-label }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          repository: unohee/ci-templates
-          ref: ${{ inputs.gates-ref }}
-          path: ${{ env.GATES_DIR }}
-      - name: Run fixture tests
+      - name: 'Art. V — the gates’ own fixture tests'
+        id: gate_self_test
+        if: ${{ !cancelled() }}
         # book.md §5.2: a test that *is* the gate counts as production code. Every case
         # here reproduces a defect review found in a gate; if they stop passing, the
-        # gates are wrong and every other job in this file is reporting on a broken ruler.
+        # gates are wrong and every other step in this job is reporting on a broken ruler.
         run: python3 "$GATES_DIR/scripts/gates/test_gates.py"
 
-  article-vi-workflow-integrity:
-    name: 'Art. VI — no gate-defeating construct in CI'
-    runs-on: ${{ inputs.runner-label }}
-    steps:
-      # No fetch-depth here: this gate reads the workflow files at HEAD, not history.
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
-        with:
-          repository: unohee/ci-templates
-          ref: ${{ inputs.gates-ref }}
-          path: ${{ env.GATES_DIR }}
-      - name: Run gate
+      - name: 'Art. VI — no gate-defeating construct in CI'
+        id: article_vi_workflow_integrity
+        if: ${{ !cancelled() }}
+        # Reads the workflow files at HEAD, not history.
         run: |
           python3 "$GATES_DIR/scripts/gates/workflow_integrity.py" \
             --repo . \
             --github | tee -a "$GITHUB_STEP_SUMMARY"
           exit "${PIPESTATUS[0]}"
 
-  gate-integrity:
-    name: 'Art. VI — every gate ran and passed'
-    runs-on: ${{ inputs.runner-label }}
-    if: always()
-    needs:
-      - article-iii-loc
-      - article-iv-architecture
-      - protocol-55-trailers
-      - article-ii-harness
-      - article-vi-workflow-integrity
-      - gate-self-test
-    steps:
-      - name: Verify
-        # This job is the difference between a gate and a status board. The workflow it
+      - name: 'Art. VI — every gate ran and passed'
+        if: ${{ !cancelled() }}
+        # This step is the difference between a gate and a status board. The workflow it
         # replaces ended in a job that printed the same table and always exited 0, so a
         # red gate still produced a green check. Here anything that is not `success` —
-        # failure, cancelled, and skipped alike — fails the build, because book.md Art. VI
-        # says a gate that could not run has not passed.
+        # failure and skipped alike — fails the build, because book.md Art. VI says a gate
+        # that could not run has not passed. (A failed gate step already fails the job;
+        # this step also catches a gate that was skipped and names every outcome.)
+        env:
+          R_III: ${{ steps.article_iii_loc.outcome }}
+          R_IV: ${{ steps.article_iv_architecture.outcome }}
+          R_55: ${{ steps.protocol_55_trailers.outcome }}
+          R_II: ${{ steps.article_ii_harness.outcome }}
+          R_VI: ${{ steps.article_vi_workflow_integrity.outcome }}
+          R_V: ${{ steps.gate_self_test.outcome }}
         run: |
           set -uo pipefail
           fail=0
@@ -248,11 +215,11 @@ jobs:
             fi
           }
 
-          check "LOC ceiling + clock" "Art. III" "${{ needs.article-iii-loc.result }}"
-          check "ARCHITECTURE.md"     "Art. IV"  "${{ needs.article-iv-architecture.result }}"
-          check "commit trailers"     "§5.5"     "${{ needs.protocol-55-trailers.result }}"
-          check "cxt bs"              "Art. II"  "${{ needs.article-ii-harness.result }}"
-          check "workflow integrity"  "Art. VI"  "${{ needs.article-vi-workflow-integrity.result }}"
-          check "gate fixture tests"  "Art. V"   "${{ needs.gate-self-test.result }}"
+          check "LOC ceiling + clock" "Art. III" "$R_III"
+          check "ARCHITECTURE.md"     "Art. IV"  "$R_IV"
+          check "commit trailers"     "§5.5"     "$R_55"
+          check "cxt bs"              "Art. II"  "$R_II"
+          check "workflow integrity"  "Art. VI"  "$R_VI"
+          check "gate fixture tests"  "Art. V"   "$R_V"
 
           exit $fail

@@ -37,19 +37,23 @@ Every input is optional:
 | `architecture-depth` | `2` | IV — directory depth treated as "structure" |
 | `cxt-version` | `'0.3.0'` | II — pinned `@intrect/cxt` |
 | `gates-ref` | `'main'` | which ref the gate scripts come from |
-| `runner-label` | `'ubuntu-latest'` | runner label used by every gate job |
+| `runner-label` | `'ubuntu-latest'` | runner label for the gate job |
 
 ### What it checks
 
-| Job | Article | Fails when |
+One job, `Constitution Gate (book.md)`, with one step per gate. Every gate step runs even
+when an earlier one failed, so a single red run names all of them. Seven separate jobs
+used to bill a minute each for checks that take seconds (2026-10-16, AGT-4747).
+
+| Step | Article | Fails when |
 |---|---|---|
-| `article-iii-loc` | III | a file has been over the ceiling for more than 30 days. Files inside the window are reported as warnings with the days remaining. |
-| `article-iv-architecture` | IV | `ARCHITECTURE.md` is missing, or a PR adds/removes directories without updating it. |
-| `protocol-55-trailers` | §5.5 | a commit in the range carries an AI co-author trailer. |
-| `article-ii-harness` | II | `cxt bs` reports a CRITICAL smell — or scans zero files, which means the gate did not run. |
-| `article-vi-workflow-integrity` | VI | a workflow file carries `continue-on-error: true`, `\|\| true`, `\|\| :`, `set +e`, `--exit-zero`, or a `continue-on-error` expression. **No exception mechanism** — if a command's non-zero exit is genuinely not a verdict, move it into a script and read the exit code there. |
-| `gate-self-test` | V | a gate's own fixture test fails — the ruler is broken, so every other result here is unreliable. |
-| `gate-integrity` | VI | **any** of the above is not `success`, including `skipped` and `cancelled`. |
+| `Art. III — LOC ceiling + 30-day clock` | III | a file has been over the ceiling for more than 30 days. Files inside the window are reported as warnings with the days remaining. |
+| `Art. IV — ARCHITECTURE.md present and current` | IV | `ARCHITECTURE.md` is missing, or a PR adds/removes directories without updating it. |
+| `§5.5 — no AI co-author trailers` | §5.5 | a commit in the range carries an AI co-author trailer. |
+| `Art. II — cxt bs (no CRITICAL smells)` | II | `cxt bs` reports a CRITICAL smell — or scans zero files, which means the gate did not run. |
+| `Art. VI — no gate-defeating construct in CI` | VI | a workflow file carries `continue-on-error: true`, `\|\| true`, `\|\| :`, `set +e`, `--exit-zero`, or a `continue-on-error` expression. **No exception mechanism** — if a command's non-zero exit is genuinely not a verdict, move it into a script and read the exit code there. |
+| `Art. V — the gates’ own fixture tests` | V | a gate's own fixture test fails — the ruler is broken, so every other result here is unreliable. |
+| `Art. VI — every gate ran and passed` | VI | **any** of the above is not `success`, including `skipped`. A cancelled run is cancelled, never green. |
 
 ## Python CI — Python repositories
 
