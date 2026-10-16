@@ -55,7 +55,8 @@ python3 scripts/gates/test_gates.py
    those commands from Python, where a non-zero exit is a value the code reads rather than
    a status the shell acts on.
 2. **A gate that could not run has not passed.** Scripts exit `2` when they cannot do
-   their job, and `gate-integrity` treats `skipped` and `cancelled` exactly like `failure`.
+   their job, and the gate job's last step treats a `skipped` gate exactly like `failure`;
+   a cancelled run ends cancelled, never green.
 3. **Gate scripts depend on nothing but Python 3 and git.** They run before any project
    dependency is installed, so they cannot import from the repo under test.
 4. **Tool versions are pinned** — `@intrect/cxt` via `cxt-version`, and ruff, black and
