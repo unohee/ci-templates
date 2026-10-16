@@ -408,6 +408,17 @@ class RunnerSelection(unittest.TestCase):
         self.assertIn('default: "ubuntu-latest"', body)
         self.assertEqual(body.count("runs-on: ${{ inputs.runner-label }}"), 1)
 
+    def test_python_pip_cache_is_only_for_github_hosted_runners(self):
+        # On a self-hosted runner `cache: pip` uploaded the runner user's whole
+        # ~/.cache/pip — 4.6 GB, 82 s per run on vega-cli (2026-10-16).
+        workflow = GATES.parents[1] / ".github" / "workflows" / "python-ci.yml"
+        body = workflow.read_text(encoding="utf-8")
+        self.assertNotRegex(body, r"(?m)^\s+cache:\s*pip\s*$")
+        line = re.search(r"(?m)^\s+cache:\s*(.+)$", body).group(1)
+        for hosted in ("ubuntu", "macos", "windows"):
+            self.assertIn(f"startsWith(inputs.runner-label, '{hosted}')", line)
+        self.assertTrue(line.endswith("&& 'pip' || '' }}"), line)
+
 
 class OneGateJob(unittest.TestCase):
     """The gates run as steps of one job (AGT-4747), so their wiring is checked here.

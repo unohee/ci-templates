@@ -33,11 +33,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      # The pip cache is for GitHub-hosted runners, which start empty. A self-hosted
+      # runner already keeps its pip cache on disk between runs, and there `cache: pip`
+      # uploads that runner user's whole ~/.cache/pip: 4.6 GB and 82 s per run on
+      # vega-cli (2026-10-16), against a 10 GB repository cache limit.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
-          cache: pip
+          cache: ${{ (startsWith(inputs.runner-label, 'ubuntu') || startsWith(inputs.runner-label, 'macos') || startsWith(inputs.runner-label, 'windows')) && 'pip' || '' }}
       - name: Install editable development dependencies
         run: python -m pip install -e ".[dev]"
       - name: Run full pytest suite
