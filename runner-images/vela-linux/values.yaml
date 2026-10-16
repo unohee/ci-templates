@@ -1,0 +1,37 @@
+# Helm values for the `vela-linux` ARC scale set (chart gha-runner-scale-set 0.15.0).
+# The deployed release is the source of truth only until this file is applied:
+#   ./deploy.sh <tag>
+# Everything except the image is what `helm get values vela-linux -n arc-runners`
+# returned on 2026-10-16 (revision 2).
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+maxRunners: 3
+minRunners: 0
+runnerGroup: vela-k3s
+runnerScaleSetName: vela-linux
+scaleSetLabels:
+- vela-linux
+template:
+  spec:
+    containers:
+    - command:
+      - /home/runner/run.sh
+      # Set by deploy.sh. The image is imported into k3s's containerd, not pulled
+      # from a registry, hence IfNotPresent.
+      image: IMAGE_PLACEHOLDER
+      imagePullPolicy: IfNotPresent
+      name: runner
+      resources:
+        limits:
+          cpu: "2"
+          memory: 8Gi
+        requests:
+          cpu: 500m
+          memory: 1Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
