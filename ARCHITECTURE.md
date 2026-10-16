@@ -21,6 +21,7 @@ as `§5.5`.
 | `.github/workflows/self.yml` | This repository calling its own constitution gate on push and PR. Without it the gates could change without ever running. |
 | `scripts/gates/test_gates.py` | Fixture tests for the gates. Every case reproduces a defect review found in a first draft; §5.2 treats a test that *is* the gate as production code. |
 | `hooks/pre-commit` | Local Python pre-commit hook (book.md Art. II layer 0). |
+| `runner-images/vela-linux/` | The image, Helm values and deploy script for the `vela-linux` ARC scale set (ephemeral k3s runners on vela). Infrastructure the workflows run on, not a workflow. |
 
 ## Entry points
 
