@@ -22,6 +22,7 @@ as `§5.5`.
 | `scripts/gates/test_gates.py` | Fixture tests for the gates. Every case reproduces a defect review found in a first draft; §5.2 treats a test that *is* the gate as production code. |
 | `hooks/pre-commit` | Local Python pre-commit hook (book.md Art. II layer 0). |
 | `runner-images/vela-linux/` | The image, Helm values and deploy script for the `vela-linux` ARC scale set (ephemeral k3s runners on vela). Infrastructure the workflows run on, not a workflow. |
+| `runner-images/vela-ci/` | The same three files for the `vela-ci` scale set, which exists for vega-agent's `CI test` job: the pod is the pinned Playwright image with the runner agent added (ARC has no container mode). Kept apart from `vela-linux`, which serves other repositories and has no browser. |
 
 ## Entry points
 

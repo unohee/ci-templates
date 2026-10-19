@@ -1,0 +1,57 @@
+# Helm values for the `vela-ci` ARC scale set (chart gha-runner-scale-set 0.15.0).
+# A second release next to `vela-linux`, for vega-agent's `CI test` job only:
+#   ./deploy.sh <tag>
+# Same secret, group and security context as `vela-linux`; what differs is the image
+# (the pinned Playwright image + runner agent), the memory-backed /dev/shm, the lower
+# ceiling, and the xdist worker count.
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+# vela is also a workstation. Two concurrent CI pods at most, not the three that
+# `vela-linux` allows: see README "Sizing".
+maxRunners: 2
+minRunners: 0
+runnerGroup: vela-k3s
+runnerScaleSetName: vela-ci
+scaleSetLabels:
+- vela-ci
+template:
+  spec:
+    containers:
+    - command:
+      - /home/runner/run.sh
+      # Set by deploy.sh. Imported into k3s's containerd, not pulled from a registry.
+      image: IMAGE_PLACEHOLDER
+      imagePullPolicy: IfNotPresent
+      name: runner
+      env:
+      # A pod's CPU limit is a cgroup quota, not a cpuset: `os.cpu_count()` still
+      # returns the host's cores, so `pytest -n auto` would start one worker per host
+      # core inside a 2-CPU pod. A hosted ubuntu-latest VM really has 2 cores, which is
+      # what the workflow was written against.
+      - name: PYTEST_XDIST_AUTO_NUM_WORKERS
+        value: "2"
+      resources:
+        limits:
+          cpu: "2"
+          memory: MEMORY_LIMIT_PLACEHOLDER
+        requests:
+          cpu: "1"
+          memory: 2Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      # Chromium needs a real shared-memory area; the default pod /dev/shm is 64 MB.
+      # This replaces the `--shm-size=1g` the job's `container:` options set. Memory-
+      # backed, so it counts against the container's memory limit.
+      - mountPath: /dev/shm
+        name: dshm
+    volumes:
+    - emptyDir:
+        medium: Memory
+        sizeLimit: 1Gi
+      name: dshm
