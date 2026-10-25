@@ -21,7 +21,11 @@ if ! docker image inspect "$base" >/dev/null 2>&1; then
   exit 1
 fi
 docker build --build-arg "BASE=${base}" -t "$image" "$here"
-docker save "$image" | sudo k3s ctr images import -
+docker save "$image" | sudo k3s ctr -n k8s.io images import -
+# Pin it: the root disk runs above kubelet's image-gc-high-threshold, so an unpinned image
+# with no running pod is garbage-collected and the next runner pod fails ImagePullBackOff
+# (lost vela-ci and vela-platform images on 2026-10-25/26).
+sudo k3s ctr -n k8s.io images label "$image" io.cri-containerd.pinned=pinned >/dev/null
 
 values="$(mktemp)"
 trap 'rm -f "$values"' EXIT
