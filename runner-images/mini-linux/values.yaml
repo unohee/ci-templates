@@ -1,0 +1,39 @@
+# Helm values for the `mini-linux` ARC scale set (chart gha-runner-scale-set 0.15.0).
+# mini joined vela's k3s cluster as an agent on 2026-10-26, which removed the scale set that
+# lived on mini's own cluster. This one recreates the label inside vela's cluster, pinned to
+# the mini node, for light jobs that should not queue behind vela's heavy pods
+# (intrect-platform's ci-ts planner and contract-freshness watchdog). The control plane is
+# vela's now, so a vela outage stops these runners too; the watchdog's independence is from
+# vela's CI load, not from vela's availability.
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+maxRunners: 2
+minRunners: 0
+runnerGroup: vela-k3s
+runnerScaleSetName: mini-linux
+scaleSetLabels:
+- mini-linux
+template:
+  spec:
+    nodeSelector:
+      ci.intrect.io/host: mini
+    containers:
+    - command:
+      - /home/runner/run.sh
+      # Stock runner image (python3, git, curl, jq; no gh, no docker).
+      image: ghcr.io/actions/actions-runner@sha256:4ffadc0002b2581327e06101fc8c06cd189232baf79fe561fac9caeb76f5e807
+      name: runner
+      resources:
+        limits:
+          cpu: "1"
+          memory: 2Gi
+        requests:
+          cpu: 250m
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault

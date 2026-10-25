@@ -8,7 +8,7 @@ githubConfigSecret: arc-github-app
 githubConfigUrl: https://github.com/Intrect-io
 # vela is also a workstation. Two concurrent CI pods at most, not the three that
 # `vela-linux` allows: see README "Sizing".
-maxRunners: 2
+maxRunners: 3
 minRunners: 0
 runnerGroup: vela-k3s
 runnerScaleSetName: vela-ci

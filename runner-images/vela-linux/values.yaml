@@ -5,7 +5,7 @@
 # returned on 2026-10-16 (revision 2).
 githubConfigSecret: arc-github-app
 githubConfigUrl: https://github.com/Intrect-io
-maxRunners: 3
+maxRunners: 5
 minRunners: 0
 runnerGroup: vela-k3s
 runnerScaleSetName: vela-linux

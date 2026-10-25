@@ -1,0 +1,98 @@
+# Helm values for the `vela-platform` ARC scale set (chart gha-runner-scale-set 0.15.0).
+# intrect-platform's CI: the vela-linux runner image plus the two databases its jobs used
+# as GitHub-hosted service containers. An ARC pod has no Docker, so `services:` and
+# `docker run` cannot work; the databases ride in the pod instead and answer on localhost.
+#
+# They are native sidecars (initContainers with restartPolicy: Always, Kubernetes >= 1.29):
+# each one must pass its startupProbe before the runner starts, and the kubelet stops
+# them when the runner container exits. Plain extra containers would keep the pod
+# Running after the job, and ARC would never see the ephemeral runner finish.
+#
+# Every job gets a fresh pod, so both databases are empty at the start of every job.
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+# vela also serves paid inference; two concurrent jobs is the ceiling (README Sizing).
+maxRunners: 2
+minRunners: 0
+runnerGroup: vela-k3s
+runnerScaleSetName: vela-platform
+scaleSetLabels:
+- vela-platform
+template:
+  spec:
+    initContainers:
+    - name: redis
+      image: redis:7.4-alpine
+      restartPolicy: Always
+      args: ["--save", "", "--appendonly", "no"]
+      startupProbe:
+        exec:
+          command: ["redis-cli", "ping"]
+        periodSeconds: 1
+        failureThreshold: 60
+      resources:
+        limits:
+          cpu: 500m
+          memory: 256Mi
+        requests:
+          cpu: 50m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+    - name: postgres
+      image: postgres:16-alpine
+      restartPolicy: Always
+      env:
+      - name: POSTGRES_PASSWORD
+        value: wallet
+      - name: POSTGRES_DB
+        value: wallet
+      # Over TCP, not the socket: the image's init runs a socket-only temporary server
+      # first, and a socket probe reports ready before the real one is up (same rule as
+      # scripts/ci-local.sh wallet-pg in intrect-platform).
+      startupProbe:
+        exec:
+          command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-q"]
+        periodSeconds: 1
+        failureThreshold: 90
+      resources:
+        limits:
+          cpu: "1"
+          memory: 768Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+      volumeMounts:
+      - name: pgdata
+        mountPath: /var/lib/postgresql/data
+    containers:
+    - command:
+      - /home/runner/run.sh
+      # Set by deploy.sh: the vela-linux runner image already imported into k3s.
+      image: IMAGE_PLACEHOLDER
+      imagePullPolicy: IfNotPresent
+      name: runner
+      env:
+      # Read only by intrect-platform's scripts/ci-local.sh wallet-pg, which uses this
+      # database instead of `docker run`. Deliberately not WALLET_PG_URL: that name makes
+      # every *.pg.test.ts run in the ordinary workspace job too. Redis needs no variable;
+      # the pytest job already points at redis://localhost:6379/15.
+      - name: CI_SIDECAR_PG_URL
+        value: postgres://postgres:wallet@127.0.0.1:5432/wallet
+      resources:
+        limits:
+          cpu: "2"
+          memory: 6Gi
+        requests:
+          cpu: 500m
+          memory: 1536Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+    volumes:
+    - name: pgdata
+      emptyDir: {}
