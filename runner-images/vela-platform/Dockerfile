@@ -5,11 +5,12 @@
 #   libchromaprint-tools fpcalc (audio fingerprints)
 #   libsndfile1          soundfile
 #   libatomic1           pnpm's standalone binary (@pnpm/exe) links it; hosted runners ship it
+#   rsync                tests/test_sync_vendor_guard.py drives scripts/sync-artifactnet-vendor.sh
 ARG BASE=localhost/vela-linux-runner:20261016
 FROM ${BASE}
 USER root
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ffmpeg libchromaprint-tools libsndfile1 libatomic1 \
+      ffmpeg libchromaprint-tools libsndfile1 libatomic1 rsync \
  && rm -rf /var/lib/apt/lists/*
 USER runner
