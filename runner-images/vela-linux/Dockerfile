@@ -28,6 +28,17 @@ RUN apt-get update \
       make rsync jq libatomic1 build-essential python3.12-venv \
  && rm -rf /var/lib/apt/lists/*
 
+# Headers for Rust audio plug-ins and apps: baseview/nih_plug_egui link X11, xcb,
+# xkbcommon and GL; cpal/midir link ALSA through pkg-config. WAVE's rust job ran
+# `sudo apt-get install` for exactly this list on hosted runners, which an ARC pod
+# cannot do (2026-10-26).
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      pkg-config libasound2-dev \
+      libx11-dev libx11-xcb-dev libxcb1-dev libxcb-icccm4-dev \
+      libxcursor-dev libxrandr-dev libxkbcommon-dev libgl-dev libglu1-mesa-dev \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
       | tar -xz -C /tmp \
  && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
