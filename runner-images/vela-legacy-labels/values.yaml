@@ -1,0 +1,79 @@
+# Helm values for the `vela-legacy-labels` ARC scale set (chart gha-runner-scale-set
+# 0.15.0). Deployed by ./deploy.sh <image-tag>.
+#
+# Why this exists as a SEPARATE scale set rather than extra `scaleSetLabels` on
+# `vela-linux`: ARC registers a scale set's labels ONCE, in the CreateRunnerScaleSet
+# call, and a later `helm upgrade` that only edits `runnerScaleSetLabels` changes the
+# Kubernetes object and nothing in GitHub — the runners keep being created with the
+# old labels, so jobs asking for the new ones wait forever while the scale set looks
+# healthy and Running (upstream issue actions/actions-runner-controller#4424; the
+# controller code only reads the labels when the scale set does not exist yet).
+# Recreating `vela-linux` to pick labels up would kill every job running on it, and
+# vela-linux serves most of the org's Linux CI, so the labels get their own object
+# instead. Delete this scale set once the workflows that ask for these labels are
+# pointed at `vela-linux` — the labels are a compatibility contract, not a design
+# (AGT-4850).
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+maxRunners: 3
+minRunners: 0
+runnerGroup: vela-k3s
+runnerScaleSetName: vela-legacy-labels
+# The labels the systemd runners on vela carried until 2026-10-27:
+#   de-artifact-linux  de-artifact ci-rust `build (linux)` — native GUI link step
+#   cost-linux-secure  de-artifact release asset verification
+#   cost-linux         de-artifact CodeQL/code-quality default setup (runner_type
+#                      "labeled", runner_label "cost-linux")
+# The same image as `vela-linux`: it now carries the X11/xcb/wayland/EGL headers the
+# build job probes for, and `gh` for the release verification.
+#
+# `self-hosted`, `Linux` and `X64` are listed EXPLICITLY. A workflow that writes the
+# familiar array form (`runs-on: [self-hosted, Linux, X64, de-artifact-linux]`) is
+# matched against the scale set's registered label list, and a scale set registers
+# only what is written here — ARC does not add the platform triple for you. Measured
+# on 2026-10-27: with only the three custom labels, de-artifact's `build (linux)` sat
+# queued for 12 minutes while this scale set ran `cost-linux` jobs, which ask for one
+# label and matched. The `vela-linux` scale set has the same latent gap for any future
+# caller that uses the array form; fixing it needs a recreation, so it is a separate
+# decision (AGT-4850).
+#
+# `de-artifact-linux` is NOT in this list yet (2026-10-27). The label matches and the
+# job does land on a pod here — de-artifact run 40457288713 job 122037711707 ran on
+# vela-legacy-labels-runner-bvbv9 — but it fails inside the job: `dtolnay/rust-toolchain
+# @stable` installs the toolchain with `--profile minimal`, and the repo's
+# rust-toolchain.toml then asks for `clippy` and `rustfmt`, so rustup tries to add
+# them and dies with `detected conflict: 'bin/cargo-fmt'`. The persistent runner never
+# sees this because its toolchain is complete. Until the workflow installs the
+# components in the same call (or the image ships them), the job belongs on the
+# persistent runner: an ARC pod that picks it only turns CI red. RIGEL owns that
+# workflow change; re-adding the label here is then a one-line edit and a redeploy.
+scaleSetLabels:
+- self-hosted
+- Linux
+- X64
+- cost-linux-secure
+- cost-linux
+template:
+  spec:
+    containers:
+    - command:
+      - /home/runner/run.sh
+      # Reuses an image `vela-linux`'s deploy.sh already imported into k3s's
+      # containerd. Nothing is pulled from a registry, hence IfNotPresent.
+      image: IMAGE_PLACEHOLDER
+      imagePullPolicy: IfNotPresent
+      name: runner
+      resources:
+        limits:
+          cpu: "2"
+          memory: 8Gi
+        requests:
+          cpu: 500m
+          memory: 1Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
