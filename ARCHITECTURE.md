@@ -23,6 +23,7 @@ as `§5.5`.
 | `hooks/pre-commit` | Local Python pre-commit hook (book.md Art. II layer 0). |
 | `runner-images/vela-linux/` | The image, Helm values and deploy script for the `vela-linux` ARC scale set (ephemeral k3s runners on vela). Infrastructure the workflows run on, not a workflow. |
 | `runner-images/vela-ci/` | The same three files for the `vela-ci` scale set, which exists for vega-agent's `CI test` job: the pod is the pinned Playwright image with the runner agent added (ARC has no container mode). Kept apart from `vela-linux`, which serves other repositories and has no browser. |
+| `runner-images/vela-legacy-labels/` | Helm values and deploy script for a disposable scale set that runs the `vela-linux` image and answers the labels vela's persistent systemd runners carried (`cost-linux-secure`, `cost-linux`). It is a separate object because ARC registers a scale set's labels once, at creation: editing them on `vela-linux` would mean recreating the org's busiest scale set. Delete it when those callers move to `vela-linux`. |
 
 ## Entry points
 

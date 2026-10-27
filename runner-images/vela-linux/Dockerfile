@@ -27,6 +27,28 @@ RUN apt-get update \
       file iproute2 lsof zsh fish xz-utils zstd ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
+# Headers that jobs ask for in `pkg-config` terms and cannot install themselves: a
+# pod has no sudo. Two callers drive this list.
+#
+# * Rust audio plug-ins and apps — baseview/nih_plug_egui link X11, xcb, xkbcommon
+#   and GL; cpal/midir link ALSA through pkg-config.
+# * de-artifact's `build (linux)` — probes `pkg-config --exists x11 x11-xcb xcb
+#   xkbcommon wayland-client egl glesv2` and runs `sudo apt-get` only when the probe
+#   fails, so every module it names has to resolve here.
+#
+# Measured on 2026-10-27 in localhost/vela-linux-runner:20261026d, before this layer:
+# x11, x11-xcb, xcb and xkbcommon resolved, `wayland-client`, `egl` and `glesv2` did
+# not — which is the `build (linux)` list failing on an ARC pod. The list below is
+# that job's own apt-get list, verbatim, plus the GUI/ALSA set.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      pkg-config libasound2-dev \
+      libx11-dev libx11-xcb-dev libxcb1-dev libxcb-icccm4-dev \
+      libxcb-util-dev libxcb-dri2-0-dev libxkbcommon-dev libxkbcommon-x11-dev \
+      libxcursor-dev libxrandr-dev libwayland-dev \
+      libgl-dev libglu1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
       | tar -xz -C /tmp \
  && install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh \
