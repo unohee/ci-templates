@@ -15,14 +15,16 @@ vela runs Ubuntu 26.04 (glibc 2.43) since 2026-11-05. On the stock image (24.04,
 glibc 2.39) about 1% of pods lost Runner.Listener mid-job: exit code 139, with the
 kernel logging a general protection fault inside glibc 2.39's `abort()`. The systemd
 runners on the host run the same runner tarball on glibc 2.43 and never crashed. The
-stock image is built on `dotnet/runtime-deps:8.0-noble`, which has no 26.04 build, so
-the Dockerfile rebuilds what it provides on `ubuntu:26.04`. Left out on purpose: the
+stock image is built on `dotnet/runtime-deps:8.0-noble`, and MCR publishes no 8.0 tag for
+26.04, so the Dockerfile rebuilds what it provides on `ubuntu:26.04`. Left out on purpose: the
 Docker CLI and buildx (the pods have no Docker daemon) and the git-core PPA.
 
 Moving the base changes the job environment too: gcc 15 instead of 13, system
-`python3` 3.14 instead of 3.12, Rust uutils as the default coreutils, and git 2.53 from
-the archive instead of the PPA's 2.55. setup-python on 26.04 can only download
-versions that actions/python-versions builds for 26.04 (3.10 and newer).
+`python3` 3.14 instead of 3.12 (`python3.12` now points at the tool-cache 3.12.15), fish
+4.2 instead of 3.7, Rust uutils as the default coreutils, and git 2.53 from the archive
+instead of the PPA's 2.55. setup-python on 26.04 can only download
+versions that actions/python-versions builds for 26.04: recent patch releases of 3.10
+and newer only.
 
 ## Why a custom image
 

@@ -4,19 +4,21 @@
 # Built on Ubuntu 26.04 so the runner's glibc matches vela's. vela was
 # dist-upgraded to 26.04 on 2026-11-05 (kernel 7.0.0-42, glibc 2.43). From then on
 # the stock actions-runner image (24.04, glibc 2.39) aborted Runner.Listener mid-job
-# in about 1% of pods: the runner log ends `Segmentation fault (core dumped)` /
-# `Exiting with unknown error code: 139`, and the kernel logs a general protection
-# fault in `.NET TP Worker` at libc.so.6[289a2], inside glibc 2.39's abort(). That
-# was 3 aborts in 42 pods in one 25-minute window. The systemd runners on the same
+# in about 1% of jobs, and in 3 of 42 pods during one 25-minute window. The runner
+# log ends `Segmentation fault (core dumped)` / `Exiting with unknown error code:
+# 139`, and the kernel logs a general protection fault in `.NET TP Worker` at
+# libc.so.6[289a2], inside glibc 2.39's abort(). The systemd runners on the same
 # host run the same runner tarball on the host's glibc 2.43 and have never crashed.
 # GLIBC_TUNABLES=glibc.pthread.rseq=0 did not help.
 #
 # The stock image cannot simply be swapped: it is built on
-# mcr.microsoft.com/dotnet/runtime-deps:8.0-noble, which has no 26.04 build. So the
-# first half of this file rebuilds what the stock image provides
+# mcr.microsoft.com/dotnet/runtime-deps:8.0-noble, and MCR publishes no 8.0 tag for
+# 26.04 (resolute; checked 2026-11-10). So the first half of this file rebuilds
+# what the stock image provides
 # (actions/runner v2.338.2 images/Dockerfile). Two parts are left out on purpose.
-# The Docker CLI and buildx: the pods have no Docker daemon, and no workflow that
-# targets vela-linux calls docker. The git-core PPA: 26.04's own git is recent enough.
+# The Docker CLI and buildx: the pods have no Docker daemon, and none of the
+# Intrect-io workflows that target vela-linux calls docker (their image builds run
+# on the `oci-build` runner; checked 2026-11-10). The git-core PPA: 26.04's own git is recent enough.
 #
 # Then come the additions. The stock image is a bare Ubuntu: no `file`, `gh`, `ss`,
 # `lsof`, `zsh` or `fish`, and no sudo inside the pod
@@ -92,13 +94,15 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # The runner is a self-contained .NET app. Its native dependencies are the list
 # bin/installdependencies.sh installs on Ubuntu (krb5, zlib, lttng-ust, OpenSSL,
 # ICU), resolved to their 26.04 names, plus the rest of dotnet/runtime-deps
-# (ca-certificates, libgcc-s1, libstdc++6, tzdata). After those come the
+# (ca-certificates, libgcc-s1, libstdc++6, tzdata, tzdata-legacy; the last one
+# keeps the US/* and EST5EDT-style zone names that 26.04 split out of tzdata).
+# After those come the
 # utilities the stock image adds. The stock image installs git with its
 # recommends, which is where its less, openssh-client and patch came from; they
 # are named here so that --no-install-recommends does not drop them.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates libgcc-s1 libstdc++6 tzdata \
+      ca-certificates libgcc-s1 libstdc++6 tzdata tzdata-legacy \
       libkrb5-3 zlib1g liblttng-ust1t64 libssl3t64 libicu78 \
       sudo lsb-release curl jq unzip git less openssh-client patch \
  && rm -rf /var/lib/apt/lists/*
@@ -167,7 +171,13 @@ ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
 
 # Owned by the job user before anything is written, and filled as that user:
 # a `chown -R` afterwards would copy the whole tree into another layer.
-RUN install -d -o runner -g runner /opt/hostedtoolcache
+#
+# The 24.04 image had a system python3.12, and STONKS' lint job calls
+# `python3.12 -m venv` by name. 26.04's system Python is 3.14, so the name points
+# at the tool-cache 3.12 below. The link dangles until that layer fills it.
+RUN install -d -o runner -g runner /opt/hostedtoolcache \
+ && ln -s "/opt/hostedtoolcache/Python/${PYTHON_VERSION}/x64/bin/python${PYTHON_VERSION%.*}" \
+      "/usr/local/bin/python${PYTHON_VERSION%.*}"
 USER runner
 
 # actions/python-versions' own installer lays the tree out the way setup-python
