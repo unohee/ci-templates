@@ -5,9 +5,26 @@ runner group `vela-k3s`). Every job gets a fresh pod from it.
 
 | File | Holds |
 |---|---|
-| `Dockerfile` | The stock `actions-runner` image (pinned by digest), plus the tools jobs cannot install themselves, plus pre-warmed Python and Node tool caches. |
+| `Dockerfile` | `ubuntu:26.04` (pinned by digest) rebuilt into what the stock `actions-runner` image provides (runner 2.338.2, k8s hooks, user `runner`), plus the tools jobs cannot install themselves, plus pre-warmed Python and Node tool caches. |
 | `values.yaml` | The scale set's Helm values. The image line is filled in by `deploy.sh`. |
 | `deploy.sh` | Build, import into k3s's containerd, `helm upgrade`. |
+
+## Why Ubuntu 26.04 and not the stock image
+
+vela runs Ubuntu 26.04 (glibc 2.43) since 2026-11-05. On the stock image (24.04,
+glibc 2.39) about 1% of pods lost Runner.Listener mid-job: exit code 139, with the
+kernel logging a general protection fault inside glibc 2.39's `abort()`. The systemd
+runners on the host run the same runner tarball on glibc 2.43 and never crashed. The
+stock image is built on `dotnet/runtime-deps:8.0-noble`, and MCR publishes no 8.0 tag for
+26.04, so the Dockerfile rebuilds what it provides on `ubuntu:26.04`. Left out on purpose: the
+Docker CLI and buildx (the pods have no Docker daemon) and the git-core PPA.
+
+Moving the base changes the job environment too: gcc 15 instead of 13, system
+`python3` 3.14 instead of 3.12 (`python3.12` now points at the tool-cache 3.12.15), fish
+4.2 instead of 3.7, Rust uutils as the default coreutils, and git 2.53 from the archive
+instead of the PPA's 2.55. setup-python on 26.04 can only download
+versions that actions/python-versions builds for 26.04: recent patch releases of 3.10
+and newer only.
 
 ## Why a custom image
 
@@ -27,4 +44,6 @@ another version still downloads it, so a stale image is slower but never wrong.
 ```
 
 Jobs that are already running keep the image they started with. Bump `PYTHON_*` and
-`NODE_VERSION` together with the URLs. The base digest moves only on purpose.
+`NODE_VERSION` together with the URLs (the Python URL is the `linux-26.04` build).
+The base digest, `RUNNER_VERSION` and the hook versions move only on purpose, each with
+its checksum.
