@@ -1,0 +1,120 @@
+# de-artifact serverless image builds (release-serverless*.yml) on vela k3s with
+# Docker-in-Docker. Replaces the standalone rtx-deartifact-serverless runner.
+# dockerd's data root is a hostPath on the seagate disk: the CUDA image does not fit
+# the node's root disk, and two dockerds must not share one data root, so maxRunners
+# stays 1. arc-runners' ResourceQuota (ci-cap: 12 CPU / 40 Gi limits, shared with every
+# other repo's vela pods) requires limits on every container, init containers included.
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+runnerGroup: vela-k3s
+runnerScaleSetName: vela-deartifact-serverless
+scaleSetLabels:
+- vela-deartifact-serverless
+minRunners: 0
+maxRunners: 1
+template:
+  spec:
+    nodeSelector:
+      kubernetes.io/hostname: vela
+      kubernetes.io/arch: amd64
+    initContainers:
+    - name: init-dind-externals
+      image: localhost/vela-linux-runner:20261027
+      imagePullPolicy: IfNotPresent
+      command: ["cp", "-r", "/home/runner/externals/.", "/home/runner/tmpDir/"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+      volumeMounts:
+      - name: dind-externals
+        mountPath: /home/runner/tmpDir
+    - name: init-work-owner
+      image: localhost/vela-linux-runner:20261027
+      imagePullPolicy: IfNotPresent
+      command: ["sh", "-c", "chown 1001:1001 /home/runner/_work"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+      securityContext:
+        runAsUser: 0
+      volumeMounts:
+      - name: work
+        mountPath: /home/runner/_work
+    - name: dind
+      image: docker:27.5-dind
+      imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      args:
+      - dockerd
+      - --host=unix:///var/run/docker.sock
+      - --group=$(DOCKER_GROUP_GID)
+      - --data-root=/var/lib/docker
+      - --mtu=1180
+      - --default-network-opt=bridge=com.docker.network.driver.mtu=1180
+      env:
+      - name: DOCKER_GROUP_GID
+        value: "123"
+      securityContext:
+        privileged: true
+      startupProbe:
+        exec:
+          command: ["docker", "info"]
+        periodSeconds: 5
+        failureThreshold: 24
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "4"
+          memory: 14Gi
+      volumeMounts:
+      - name: work
+        mountPath: /home/runner/_work
+      - name: dind-sock
+        mountPath: /var/run
+      - name: dind-externals
+        mountPath: /home/runner/externals
+      - name: docker-data
+        mountPath: /var/lib/docker
+    containers:
+    - name: runner
+      image: localhost/vela-linux-runner:20261027
+      imagePullPolicy: IfNotPresent
+      command: ["/home/runner/run.sh"]
+      env:
+      - name: DOCKER_HOST
+        value: unix:///var/run/docker.sock
+      - name: RUNNER_WAIT_FOR_DOCKER_IN_SECONDS
+        value: "120"
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      volumeMounts:
+      - name: work
+        mountPath: /home/runner/_work
+      - name: dind-sock
+        mountPath: /var/run
+    volumes:
+    - name: work
+      emptyDir: {}
+    - name: dind-sock
+      emptyDir: {}
+    - name: dind-externals
+      emptyDir: {}
+    - name: docker-data
+      hostPath:
+        path: /media/unohee/seagate4tb/ci-docker-deartifact
+        type: DirectoryOrCreate

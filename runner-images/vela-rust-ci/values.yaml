@@ -1,0 +1,51 @@
+# Helm values for the `vela-rust-ci` ARC scale set (chart gha-runner-scale-set 0.15.0).
+# Replaces the systemd runners rtx-rust-ci-1/2 for de-leak-rt, patina and intrect-plugin.
+# Sizing comes from hosts/vela/rust-ci/50-rust-ci-isolation.conf (CPUQuota 400%, MemoryMax 9G
+# per runner, two runners); the largest measured job peaked at 5.8 GiB.
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+maxRunners: 2
+minRunners: 0
+runnerGroup: vela-k3s
+runnerScaleSetName: vela-rust-ci
+scaleSetLabels:
+- vela-rust-ci
+template:
+  spec:
+    # Kernel 7.0: the k3s default AppArmor profile (cri-containerd.apparmor.d) blocks signals
+    # between processes of the same container, so kill/killpg returns EPERM (de-leak-rt's
+    # daw_uat test_real_command_timeout_preserves_partial_output failed with PermissionError on
+    # the first run, 2026-11-08). Same workaround as vela-platform, until the profile is fixed.
+    securityContext:
+      appArmorProfile:
+        type: Unconfined
+    containers:
+    - command:
+      - /home/runner/run.sh
+      image: IMAGE_PLACEHOLDER
+      imagePullPolicy: IfNotPresent
+      name: runner
+      resources:
+        limits:
+          cpu: "4"
+          memory: 9Gi
+        requests:
+          cpu: "1"
+          memory: 2Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      # Persistent cargo target dirs on NVMe (RUST_CI_TARGET_ROOT=/cache/cargo-target).
+      # Created and chowned to uid 1001 by deploy.sh.
+      - mountPath: /cache/cargo-target
+        name: cargo-target
+    volumes:
+    - name: cargo-target
+      hostPath:
+        path: /media/unohee/nvme1tb/gha-rust-arc/cargo-target
+        type: Directory
