@@ -42,3 +42,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 -I scripts/test_ci_changes.py
+
+  # The ARC values files are applied with `helm upgrade` from this public repository.
+  runner-images-tests:
+    name: 'runner-images scale set definitions'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -I scripts/test_runner_images.py

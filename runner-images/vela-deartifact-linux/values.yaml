@@ -1,0 +1,38 @@
+# de-artifact `build (linux)` (VST3/CLAP bundle) on vela k3s. Replaces the standalone
+# rtx-deartifact-linux container. Image: ~/de-artifact-runner-image/Dockerfile.
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+runnerGroup: vela-k3s
+runnerScaleSetName: vela-deartifact-linux
+scaleSetLabels:
+- vela-deartifact-linux
+minRunners: 0
+# Each release build fills a ~10-20 GB target dir on the node disk (98 % used, ~100 GB free),
+# and arc-runners shares one ResourceQuota (ci-cap: 12 CPU / 40 Gi limits) with every
+# other repo's vela pods, so one build at a time.
+maxRunners: 1
+template:
+  spec:
+    nodeSelector:
+      kubernetes.io/hostname: vela
+      kubernetes.io/arch: amd64
+    containers:
+    - name: runner
+      image: localhost/de-artifact-linux-runner:20261027
+      imagePullPolicy: IfNotPresent
+      command:
+      - /home/runner/run.sh
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 10Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
