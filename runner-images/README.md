@@ -7,7 +7,7 @@ arc-runners quota was lost once (AUD-2467).
 
 | Namespace/scale set | Definition | Image |
 |---|---|---|
-| `arc-runners/vela-linux` | `vela-linux/` | `vela-linux/Dockerfile` |
+| `arc-runners/vela-linux` | `vela-linux/` | `vela-linux/Dockerfile`. **The live image `20261110-ubuntu2604` is built from PR #18's Dockerfile, not this one. Do not run `vela-linux/deploy.sh` from main until #18 lands.** |
 | `arc-runners/vela-ci` | `vela-ci/` | `vela-ci/Dockerfile` |
 | `arc-runners/vela-legacy-labels` | `vela-legacy-labels/` | `vela-linux` image |
 | `arc-runners/vela-platform` | `vela-platform/` | `vela-platform/Dockerfile` |
@@ -32,6 +32,9 @@ sudo env KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm get values -n arc-runners <na
 ```
 
 On 2026-11-15 (AGT-4910) every values file here matched its live release apart from those
-placeholders. `scripts/test_runner_images.py` checks that each directory names its own
+placeholders. Image definitions were checked against the live images' layer history
+(`sudo k3s crictl inspecti <image>`): `vela-platform:20261026e` and
+`de-artifact-linux-runner:20261027` match their Dockerfiles here; `vela-linux` does not
+(see the table). `scripts/test_runner_images.py` checks that each directory names its own
 scale set and that no values file carries an inline credential (this repository is public;
 the GitHub App credentials live in the `arc-github-app` Kubernetes secret).

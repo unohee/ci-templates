@@ -5,7 +5,7 @@ It serves intrect-platform's CI after GitHub-hosted jobs stopped starting on 202
 
 | File | Holds |
 |---|---|
-| `Dockerfile` | `vela-linux-runner` plus ffmpeg, libchromaprint-tools (fpcalc) and libsndfile1, which the pytest job used to `sudo apt-get install` on a hosted VM. The pod runs as uid 1001 without sudo. |
+| `Dockerfile` | `vela-linux-runner:20261026d` plus ffmpeg, libchromaprint-tools (fpcalc), libsndfile1 and python3.12-venv, which the pytest and backup jobs need. The pod runs as uid 1001 without sudo, so they are baked in. |
 | `values.yaml` | Helm values. Redis and Postgres run as **native sidecars** (`initContainers` + `restartPolicy: Always`): each passes a startupProbe before the runner starts and stops when the runner exits. |
 | `deploy.sh` | `./deploy.sh <tag> <vela-linux base tag>`: build on top of the vela-linux image, import into k3s's containerd, `helm upgrade --install vela-platform`. Never touches vela-linux or vela-ci. |
 

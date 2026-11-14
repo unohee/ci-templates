@@ -1,5 +1,5 @@
 # de-artifact `build (linux)` (VST3/CLAP bundle) on vela k3s. Replaces the standalone
-# rtx-deartifact-linux container. Image: ~/de-artifact-runner-image/Dockerfile.
+# rtx-deartifact-linux container. Image: ./Dockerfile (see README.md).
 githubConfigSecret: arc-github-app
 githubConfigUrl: https://github.com/Intrect-io
 runnerGroup: vela-k3s

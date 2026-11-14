@@ -11,7 +11,7 @@ run with no-new-privileges, so nothing can be apt-installed during a job.
 These files were copied on 2026-11-15 (AGT-4910) from de-artifact's unmerged branch
 `ci/k3s-linux-runners` (`ci/vela-runner/`, PR #248). The values equal the live release.
 The live image `localhost/de-artifact-linux-runner:20261027` was built from that
-Dockerfile.
+Dockerfile; its layer history matches it. Despite the tag, it was built on 2026-11-09.
 
 Rebuild and roll out on vela:
 
