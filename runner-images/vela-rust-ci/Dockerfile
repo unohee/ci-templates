@@ -24,7 +24,15 @@ RUN apt-get update \
       libgl-dev libglib2.0-dev libasound2-dev libssl-dev libfontconfig-dev \
       mesa-vulkan-drivers libvulkan1 libgl1-mesa-dri libegl1 libegl-dev xvfb \
       python3 python3-venv \
+      xxd \
  && rm -rf /var/lib/apt/lists/*
+
+# xxd: de-leak-rt's plaintext-model gate test (scripts/test_verify_no_plain_models_release.sh)
+# turns a seed hex string back into bytes with `xxd -r -p`, and the rustfmt job failed with
+# "xxd: command not found" on every main run after this scale set went live (2026-11-16, 11-17).
+# The package is `xxd`, not `vim-common`: this base splits it out. The check below fails the
+# build rather than letting a job discover the gap again.
+RUN printf '4142' | xxd -r -p | od -An -tx1 | tr -d ' \n' | grep -qx 4142
 
 ENV RUSTUP_HOME=/opt/rust/rustup \
     CARGO_HOME=/opt/rust/cargo \
