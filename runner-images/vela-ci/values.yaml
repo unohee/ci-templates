@@ -8,7 +8,7 @@ githubConfigSecret: arc-github-app
 githubConfigUrl: https://github.com/Intrect-io
 # vela is also a workstation. Two concurrent CI pods at most, not the three that
 # `vela-linux` allows: see README "Sizing".
-maxRunners: 2
+maxRunners: 3
 minRunners: 0
 runnerGroup: vela-k3s
 runnerScaleSetName: vela-ci
@@ -39,6 +39,11 @@ template:
           memory: 2Gi
       securityContext:
         allowPrivilegeEscalation: false
+        # Matches the live release (2026-11-15, AGT-4910): kernel 7.0's k3s default
+        # AppArmor profile blocks signals between processes in one container (see
+        # vela-platform). Unconfined until that profile is fixed.
+        appArmorProfile:
+          type: Unconfined
         capabilities:
           drop:
           - ALL

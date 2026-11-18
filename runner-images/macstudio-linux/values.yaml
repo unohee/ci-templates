@@ -1,0 +1,46 @@
+# Helm values for the `macstudio-linux` ARC scale set (chart gha-runner-scale-set 0.15.0).
+# Exported from the live release on 2026-11-15 (AGT-4910); it had no definition in any
+# repository before that. Light Linux jobs pinned to the macstudio node (arm64) of vela's
+# k3s cluster. The node is tainted `ci.intrect.io/arch=arm64:NoSchedule`, so only pods that
+# tolerate it land there. Stock runner image, no custom build.
+#
+#   sudo env KUBECONFIG=/etc/rancher/k3s/k3s.yaml helm upgrade --install macstudio-linux \
+#     oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+#     --version 0.15.0 -n arc-runners -f values.yaml
+githubConfigSecret: arc-github-app
+githubConfigUrl: https://github.com/Intrect-io
+maxRunners: 2
+minRunners: 0
+runnerGroup: vela-k3s
+runnerScaleSetName: macstudio-linux
+scaleSetLabels:
+- macstudio-linux
+template:
+  spec:
+    containers:
+    - command:
+      - /home/runner/run.sh
+      image: ghcr.io/actions/actions-runner@sha256:4ffadc0002b2581327e06101fc8c06cd189232baf79fe561fac9caeb76f5e807
+      name: runner
+      resources:
+        limits:
+          cpu: "2"
+          memory: 3Gi
+        requests:
+          cpu: 250m
+          memory: 512Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        seccompProfile:
+          type: RuntimeDefault
+    nodeSelector:
+      ci.intrect.io/host: macstudio
+    priorityClassName: ci-offvela
+    tolerations:
+    - effect: NoSchedule
+      key: ci.intrect.io/arch
+      operator: Equal
+      value: arm64

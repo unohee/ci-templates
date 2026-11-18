@@ -5,12 +5,18 @@
 # returned on 2026-10-16 (revision 2).
 githubConfigSecret: arc-github-app
 githubConfigUrl: https://github.com/Intrect-io
-maxRunners: 3
+maxRunners: 5
 minRunners: 0
 runnerGroup: vela-k3s
 runnerScaleSetName: vela-linux
+# The three legacy labels ride on this scale set too (live since 2026-10-27; recorded
+# here on 2026-11-15, AGT-4910). `vela-legacy-labels` still exists and also matches
+# array-form `runs-on`; see its README.
 scaleSetLabels:
 - vela-linux
+- de-artifact-linux
+- cost-linux-secure
+- cost-linux
 template:
   spec:
     containers:

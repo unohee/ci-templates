@@ -47,6 +47,11 @@ runnerScaleSetName: vela-legacy-labels
 # components in the same call (or the image ships them), the job belongs on the
 # persistent runner: an ARC pod that picks it only turns CI red. RIGEL owns that
 # workflow change; re-adding the label here is then a one-line edit and a redeploy.
+#
+# 2026-11-15 (AGT-4906): moot. `build (linux)` now runs on its own scale set
+# (`runs-on: vela-deartifact-linux`), the persistent runner `rtx-deartifact-linux` is
+# deregistered, and no default-branch workflow asks for `de-artifact-linux`. The live
+# `vela-linux` release lists the bare label (see its values.yaml).
 scaleSetLabels:
 - self-hosted
 - Linux

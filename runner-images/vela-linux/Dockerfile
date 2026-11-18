@@ -25,6 +25,7 @@ USER root
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       file iproute2 lsof zsh fish xz-utils zstd ca-certificates curl \
+      make rsync jq libatomic1 build-essential python3.12-venv \
  && rm -rf /var/lib/apt/lists/*
 
 # Headers that jobs ask for in `pkg-config` terms and cannot install themselves: a

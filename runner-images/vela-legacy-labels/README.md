@@ -6,7 +6,7 @@ systemd runners on vela carried until 2026-10-27:
 
 | Label | What asks for it |
 |---|---|
-| `de-artifact-linux` | `de-artifact/.github/workflows/ci-rust.yml` → `build (linux)` (native GUI link step) |
+| `de-artifact-linux` | Nothing on any default branch since `build (linux)` moved to `vela-deartifact-linux` (checked 2026-11-15, AGT-4906). Old de-artifact PR branches still name it until they rebase. Not registered on this scale set; `vela-linux` carries it |
 | `cost-linux-secure` | `de-artifact` release → "verify GitHub Release assets" |
 | `cost-linux` | `de-artifact` CodeQL and code-quality default setup (`runner_type: labeled`, `runner_label: cost-linux`) |
 
