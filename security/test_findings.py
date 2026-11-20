@@ -233,6 +233,32 @@ class Gate(unittest.TestCase):
             second = run_script("--baseline", str(baseline_path))
             self.assertEqual(second.returncode, 0, second.stdout.decode())
 
+    def test_write_baseline_refuses_an_absolute_path(self) -> None:
+        """A baseline entry with an absolute path can never match: the export directory changes
+        every run. This was measured the hard way — a baseline written with the repository as
+        --root instead of the exported tree recorded /tmp/.../src/Cargo.lock and accepted
+        nothing, so the gate failed on the same findings on every run afterwards.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            export = Path(tmp) / "export"
+            export.mkdir()
+            osv_report = Path(tmp) / "osv.json"
+            entry = osv_entry()
+            entry["source"] = {"path": str(export / "requirements.txt")}
+            osv_report.write_text(json.dumps({"results": [entry]}), encoding="utf-8")
+            target = Path(tmp) / "baseline.json"
+            proc = subprocess.run(
+                [sys.executable, "-I", str(SCRIPT), "--root", str(root), "--osv", str(osv_report),
+                 "--write-baseline", str(target), "--baseline-reason", "test"],
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 2, proc.stdout.decode())
+            self.assertIn("absolute path", proc.stderr.decode())
+            self.assertFalse(target.exists())
+
     def test_write_baseline_without_a_reason_is_refused(self) -> None:
         code, out, _ = run({}, baseline=None)
         self.assertEqual(code, 0, out)  # sanity: no reports, nothing to gate

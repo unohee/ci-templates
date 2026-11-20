@@ -12,6 +12,8 @@
 #   bash security/scan.sh --repo ~/dev/de-artifact                 # full: history, whole tree
 #   bash security/scan.sh --repo . --profile pr --base origin/main  # pull-request pass
 #   bash security/scan.sh --repo . --quality                        # add the quality report
+#   bash security/scan.sh --repo . --write-baseline security/baseline.json \
+#        --baseline-reason "pre-existing before the gate was adopted (AUD-nnnn)"   # first run
 #
 # What runs:
 #   secrets  gitleaks over the git history (full) or over BASE..HEAD (pr). Reports never carry
@@ -35,6 +37,8 @@ base=""
 out=""
 tools_dir="${SECURITY_TOOLS_DIR:-$HOME/.local/share/intrect-security}"
 baseline=""
+write_baseline=""
+baseline_reason=""
 quality=0
 keep=0
 while [ "$#" -gt 0 ]; do
@@ -45,6 +49,8 @@ while [ "$#" -gt 0 ]; do
     --out) out="$2"; shift 2 ;;
     --tools-dir) tools_dir="$2"; shift 2 ;;
     --baseline) baseline="$2"; shift 2 ;;
+    --write-baseline) write_baseline="$2"; shift 2 ;;
+    --baseline-reason) baseline_reason="$2"; shift 2 ;;
     --quality) quality=1; shift ;;
     --keep) keep=1; shift ;;
     -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]}"; exit 0 ;;
@@ -93,9 +99,13 @@ status=0
 secret_range="--all"
 [ "$profile" = pr ] && secret_range="$base..HEAD"
 echo "scan: gitleaks ($profile: $secret_range)"
-if ! "$gitleaks" git "$root" --log-opts="$secret_range" --report-format=json \
-      --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color \
-      >>"$log" 2>&1; then
+gitleaks_args=(git "$root" --log-opts="$secret_range" --report-format=json
+               --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color)
+# A repository may narrow the rules next to the shared set, like security/semgrep.yml. Without
+# --config gitleaks only looks for .gitleaks.toml at the repository root, so passing it explicitly
+# keeps a local run and the workflow on the same rules.
+[ -f "$root/security/gitleaks.toml" ] && gitleaks_args+=(--config "$root/security/gitleaks.toml")
+if ! "$gitleaks" "${gitleaks_args[@]}" >>"$log" 2>&1; then
   echo "scan: gitleaks failed; see $log" >&2
   tail -20 "$log" >&2
   exit 2
@@ -161,10 +171,20 @@ fi
 # --- gate -------------------------------------------------------------------------
 summary="$work/summary.json"
 [ -n "$out" ] && summary="$out"
+# --root is $src, the exported tree: that is what the scanners report from, so a baseline entry
+# written from this run names the same path a later run will see.
+gate_args=(--summary "$summary" --root "$src"
+           --gitleaks "$work/gitleaks.json" --semgrep "$work/semgrep.json" --osv "$work/osv.json")
+[ -n "$baseline" ] && gate_args+=(--baseline "$baseline")
+if [ -n "$write_baseline" ]; then
+  [ -n "$baseline_reason" ] || {
+    echo "scan: --write-baseline needs --baseline-reason" >&2
+    exit 2
+  }
+  gate_args+=(--write-baseline "$write_baseline" --baseline-reason "$baseline_reason")
+fi
 set +e
-python3 "$here/findings.py" --summary "$summary" --root "$src" \
-  --gitleaks "$work/gitleaks.json" --semgrep "$work/semgrep.json" --osv "$work/osv.json" \
-  ${baseline:+--baseline "$baseline"}
+python3 "$here/findings.py" "${gate_args[@]}"
 gate=$?
 set -e
 [ "$gate" = 2 ] && status=2

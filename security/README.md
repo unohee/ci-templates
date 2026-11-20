@@ -92,15 +92,18 @@ still blocks.
 
 `security/baseline.json` is read automatically when it exists, both locally and in CI, so a
 repository does not have to pass `--baseline` (and the reusable workflow does not). To record the
-first run:
+first run, let `scan.sh` write it — it passes the export directory as the root, so every entry
+names the same path a later run will see:
 
 ```bash
-bash security/scan.sh --repo . --profile full --keep --out /tmp/first-run.json
-# fix what should be fixed, then record the rest:
-python3 ci-templates/security/findings.py --root . \
-  --gitleaks <artifacts>/gitleaks.json --semgrep <artifacts>/semgrep.json --osv <artifacts>/osv.json \
-  --write-baseline security/baseline.json --baseline-reason "pre-existing before the gate was adopted (AUD-nnnn)"
+# fix what should be fixed first, then record the rest; the run still reports what it recorded
+bash security/scan.sh --repo . --write-baseline security/baseline.json \
+  --baseline-reason "pre-existing before the gate was adopted (AUD-nnnn)"
 ```
+
+Writing the file by hand through `findings.py --write-baseline` works only with `--root` set to
+the exported tree; with any other root the entries come out absolute and can never match, so the
+writer refuses them.
 
 ## In CI
 
