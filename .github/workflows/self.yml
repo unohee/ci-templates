@@ -42,3 +42,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 -I scripts/test_ci_changes.py
+
+  # The security gate is what every repository that calls security-local.yml gates on, so its
+  # own decisions have to be tested here. Both test files use fixtures and stub tools: no
+  # network, no scanner install, a few seconds.
+  security-gate-tests:
+    name: 'security gate tests'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -I security/test_findings.py
+      - run: bash security/test_scan.sh
