@@ -57,6 +57,14 @@ case "$profile" in full|pr) ;; *) echo "scan: --profile must be full or pr" >&2;
 root="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" \
   || { echo "scan: $repo is not a git working tree" >&2; exit 2; }
 
+# A repository records the findings it has accepted in security/baseline.json (see README). Using
+# it by default keeps a local run and the reusable workflow on the same judgement: the workflow
+# passes no --baseline, and a first adoption would otherwise fail on day one.
+if [ -z "$baseline" ] && [ -f "$root/security/baseline.json" ]; then
+  baseline="$root/security/baseline.json"
+  echo "scan: baseline=$baseline"
+fi
+
 gitleaks="$tools_dir/bin/gitleaks"
 osv="$tools_dir/bin/osv-scanner"
 semgrep="$tools_dir/venv/bin/semgrep"

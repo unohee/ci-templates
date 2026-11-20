@@ -90,6 +90,18 @@ names it exactly and says why:
 A baseline entry accepts that one tool+rule+path+line. A different vulnerability in the same file
 still blocks.
 
+`security/baseline.json` is read automatically when it exists, both locally and in CI, so a
+repository does not have to pass `--baseline` (and the reusable workflow does not). To record the
+first run:
+
+```bash
+bash security/scan.sh --repo . --profile full --keep --out /tmp/first-run.json
+# fix what should be fixed, then record the rest:
+python3 ci-templates/security/findings.py --root . \
+  --gitleaks <artifacts>/gitleaks.json --semgrep <artifacts>/semgrep.json --osv <artifacts>/osv.json \
+  --write-baseline security/baseline.json --baseline-reason "pre-existing before the gate was adopted (AUD-nnnn)"
+```
+
 ## In CI
 
 `.github/workflows/security-local.yml` is the reusable workflow. A repository calls it:

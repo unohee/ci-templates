@@ -91,7 +91,7 @@ expect_exit "clean reports exit 0" 0
 
 # 3. A planted leak fails the scan, is named, and is never printed.
 secret="stub-secret-value-1234567890"
-STUB_GITLEAKS_JSON="$(printf '[{"RuleID":"aws-access-token","Description":"AWS access token","File":"%s/app.py","StartLine":1,"Secret":"%s","Match":"x"}]' "$repo" "$secret")" run_scan
+STUB_GITLEAKS_JSON="$(printf '[{"RuleID":"aws-access-token","Description":"AWS access token","File":"app.py","StartLine":1,"Secret":"%s","Match":"x"}]' "$secret")" run_scan
 expect_exit "planted secret exits 1" 1
 contains "planted secret names the rule" "$out" "aws-access-token"
 missing "planted secret is not printed" "$out" "$secret"
@@ -130,6 +130,31 @@ contains "full gitleaks reads --all" "$(cat "$work/args/gitleaks")" "--log-opts=
 : > "$work/args/gitleaks"
 run_scan --profile pr --base HEAD~1
 contains "pr gitleaks reads the range" "$(cat "$work/args/gitleaks")" "--log-opts=HEAD~1..HEAD"
+
+# 8. A repository baseline at security/baseline.json is used without being asked for: the planted
+#    secret passes once it is recorded as accepted. This is what keeps a first adoption from
+#    failing on the findings that were already there, and what makes the workflow (which passes no
+#    --baseline) and a local run agree.
+mkdir -p "$repo/security"
+python3 - "$repo" <<'PY'
+import json, sys
+
+repo = sys.argv[1]
+entry = {
+    "tool": "secret",
+    "rule": "aws-access-token",
+    "path": "app.py",
+    "line": 1,
+    "reason": "test fixture",
+    "added": "2026-11-20",
+}
+with open(f"{repo}/security/baseline.json", "w", encoding="utf-8") as handle:
+    json.dump({"accepted": [entry]}, handle)
+PY
+STUB_GITLEAKS_JSON="$(printf '[{"RuleID":"aws-access-token","Description":"AWS access token","File":"app.py","StartLine":1,"Secret":"%s","Match":"x"}]' "$secret")" run_scan
+expect_exit "a baselined finding does not block" 0
+contains "the baseline in use is named" "$out" "security/baseline.json"
+rm -rf "$repo/security"
 
 echo
 echo "test_scan: $pass passed, $fail failed"
