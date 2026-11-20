@@ -227,6 +227,11 @@ def write_baseline(path, findings, reason, today):
     pre-existing findings, and a gate that blocks all of them on day one is switched off
     within a week. The reason is required and lands next to every entry, so the pull request
     that adds the file says what it is accepting and why.
+
+    A finding path is kept relative to the scan root. An absolute one can never match a later
+    run (the export directory changes every time), and it means the caller passed a root that
+    is not where the scanners reported from: refusing is cheaper than a baseline that silently
+    accepts nothing. scan.sh passes the right root when it is asked to write one.
     """
     accepted = sorted(
         (
@@ -243,10 +248,18 @@ def write_baseline(path, findings, reason, today):
         ),
         key=lambda e: (e["tool"], e["path"], e["line"], e["rule"]),
     )
+    absolute = sorted({entry["path"] for entry in accepted if entry["path"].startswith("/")})
+    if absolute:
+        raise ReportError(
+            f"baseline: refusing to record the absolute path {absolute[0]}. Pass --root the "
+            "directory the scanners reported from (scan.sh exports the tree and passes it), "
+            "otherwise no entry can match a later run."
+        )
     Path(path).write_text(
         json.dumps({"accepted": accepted}, indent=2) + "\n", encoding="utf-8"
     )
     print(f"baseline: wrote {len(accepted)} accepted finding(s) to {path}")
+    return accepted
 
 
 def main(argv=None):
@@ -288,12 +301,16 @@ def main(argv=None):
         print(f"note: {note}")
 
     if args.write_baseline:
-        write_baseline(
-            args.write_baseline,
-            findings,
-            args.baseline_reason,
-            args.today or date.today().isoformat(),
-        )
+        try:
+            write_baseline(
+                args.write_baseline,
+                findings,
+                args.baseline_reason,
+                args.today or date.today().isoformat(),
+            )
+        except ReportError as error:
+            print(f"findings: {error}", file=sys.stderr)
+            return 2
 
     blocking = render(findings, args.root)
 

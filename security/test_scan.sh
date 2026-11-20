@@ -52,21 +52,35 @@ cat > "$tools/bin/gitleaks" <<'STUB'
 set -euo pipefail
 echo "$*" >> "${STUB_ARGS_DIR}/gitleaks"
 for arg in "$@"; do case "$arg" in --report-path=*) out="${arg#--report-path=}" ;; esac; done
-printf '%s' "${STUB_GITLEAKS_JSON:-[]}" > "${out:?}"
+json="${STUB_GITLEAKS_JSON-}"
+[ -n "$json" ] || json='[]'
+printf '%s' "$json" > "${out:?}"
 STUB
 cat > "$tools/bin/osv-scanner" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "$*" >> "${STUB_ARGS_DIR}/osv-scanner"
 while [ "$#" -gt 0 ]; do case "$1" in --output-file) out="$2"; shift ;; esac; shift; done
-printf '%s' "${STUB_OSV_JSON:-{\"results\": []}}" > "${out:?}"
+json="${STUB_OSV_JSON-}"
+[ -n "$json" ] || json='{"results": []}'
+printf '%s' "$json" > "${out:?}"
 STUB
 cat > "$tools/venv/bin/semgrep" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "$*" >> "${STUB_ARGS_DIR}/semgrep"
-while [ "$#" -gt 0 ]; do case "$1" in --output) out="$2"; shift ;; esac; shift; done
-printf '%s' "${STUB_SEMGREP_JSON:-{\"results\": [], \"errors\": []}}" > "${out:?}"
+out=""
+base=""
+want_out=0
+for arg in "$@"; do
+  if [ "$want_out" = 1 ]; then out="$arg"; want_out=0; continue; fi
+  case "$arg" in --output) want_out=1 ;; esac
+  if [ -d "$arg" ]; then base="$arg"; fi
+done
+json="${STUB_SEMGREP_JSON-}"
+[ -n "$json" ] || json='{"results": [], "errors": []}'
+where="${base:-.}"
+printf '%s' "${json//__EXPORT__/$where}" > "${out:?}"
 STUB
 chmod 0755 "$tools/bin/gitleaks" "$tools/bin/osv-scanner" "$tools/venv/bin/semgrep"
 export STUB_ARGS_DIR="$work/args"
@@ -155,6 +169,29 @@ STUB_GITLEAKS_JSON="$(printf '[{"RuleID":"aws-access-token","Description":"AWS a
 expect_exit "a baselined finding does not block" 0
 contains "the baseline in use is named" "$out" "security/baseline.json"
 rm -rf "$repo/security"
+
+# 9. A repository that narrows the secret rules in security/gitleaks.toml has it passed
+#    explicitly: gitleaks' own auto-discovery looks only at the repository root.
+mkdir -p "$repo/security"
+printf '[extend]\nuseDefault = true\n' > "$repo/security/gitleaks.toml"
+: > "$work/args/gitleaks"
+run_scan
+contains "repo gitleaks config is passed" "$(cat "$work/args/gitleaks")" "--config $repo/security/gitleaks.toml"
+rm -f "$repo/security/gitleaks.toml"
+
+# 10. --write-baseline writes paths a later run can match: the entry names the file as the
+#     scanners reported it, not the temporary export directory. findings.py is called with the
+#     export as its root, so an absolute path is refused instead of being recorded.
+STUB_SEMGREP_JSON='{"results": [{"check_id": "python.test.rule", "path": "__EXPORT__/app.py", "start": {"line": 1}, "extra": {"severity": "ERROR", "message": "test finding", "metadata": {}}}], "errors": []}' \
+  run_scan --write-baseline "$work/written-baseline.json" --baseline-reason "fixture reason"
+expect_exit "writing a baseline still reports the findings it recorded" 1
+written_path="$(python3 -c "import json;print(json.load(open('$work/written-baseline.json'))['accepted'][0]['path'])" 2>/dev/null || echo MISSING)"
+if [ "$written_path" = "app.py" ]; then
+  ok "the written baseline names the file relative to the repository"
+else
+  bad "the written baseline names the file relative to the repository" "(got '$written_path')"
+fi
+contains "the written baseline carries the reason" "$(cat "$work/written-baseline.json")" "fixture reason"
 
 echo
 echo "test_scan: $pass passed, $fail failed"
