@@ -193,6 +193,42 @@ class Gate(unittest.TestCase):
                              baseline={"accepted": [entry]})
         self.assertEqual(other, 1, out2)
 
+    def test_a_sast_entry_keeps_accepting_when_an_edit_moved_the_line(self) -> None:
+        """A five-line insertion above an accepted finding re-numbers it. An exact-only
+        baseline called the accepted uses in release.yml new (PR #397); the count must not
+        change, so one entry still accepts one finding with the same rule and file."""
+        entry = {
+            "tool": "sast",
+            "rule": "python.test.rule",
+            "path": "scripts/thing.py",
+            "line": 7,
+            "reason": "pre-existing before the gate was adopted (AUD-3011)",
+            "added": "2026-11-20",
+        }
+        moved, out, summary = run(
+            {"semgrep": semgrep([semgrep_result("ERROR", line=12)])},
+            baseline={"accepted": [entry]},
+        )
+        self.assertEqual(moved, 0, out)
+        self.assertEqual(summary["blocking"], 0)
+        self.assertIn("line this change moved", out)
+
+    def test_a_second_occurrence_of_the_same_rule_still_blocks(self) -> None:
+        entry = {
+            "tool": "sast",
+            "rule": "python.test.rule",
+            "path": "scripts/thing.py",
+            "line": 7,
+            "reason": "pre-existing before the gate was adopted (AUD-3011)",
+            "added": "2026-11-20",
+        }
+        code, out, summary = run(
+            {"semgrep": semgrep([semgrep_result("ERROR"), semgrep_result("ERROR", line=12)])},
+            baseline={"accepted": [entry]},
+        )
+        self.assertEqual(code, 1, out)
+        self.assertEqual(summary["blocking"], 1)
+
     def test_baseline_without_a_reason_still_records_one(self) -> None:
         entry = {"tool": "sast", "rule": "python.test.rule", "path": "scripts/thing.py", "line": 7}
         code, out, _ = run({"semgrep": semgrep([semgrep_result("ERROR")])}, baseline=[entry])

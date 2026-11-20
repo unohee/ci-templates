@@ -15,10 +15,13 @@
 #   secret   every finding blocks; a baseline entry with a reason accepts one.
 #   sast     a result blocks at severity ERROR, and at WARNING when the rule declares
 #            metadata.confidence: high (an error-only gate let a js/xss-through-dom
-#            warning with security-severity 7.8 through; see AUD-3009).
+#            warning with security-severity 7.8 through; see AUD-3009). A baseline entry
+#            for a sast finding keeps accepting one finding with the same rule and file
+#            when an edit moved the line; the count still blocks a new occurrence.
 #   deps     every known vulnerability blocks; a baseline entry with a reason accepts one.
 # Exit: 0 nothing blocking, 1 at least one blocking finding, 2 a report could not be read.
 import argparse
+import collections
 import json
 import sys
 from datetime import date
@@ -163,21 +166,49 @@ def osv_findings(path, root):
     return out
 
 
-def baseline_keys(entries):
-    """A baseline entry matches one finding exactly: tool, rule, path and line."""
-    keys = {}
+def loose_key(finding):
+    """The part of a static-analysis finding that survives an edit further up the file."""
+    return (finding.get("tool"), finding.get("rule"), finding.get("path"))
+
+
+def baseline_slots(entries):
+    """A baseline entry accepts one finding. Two kinds of match, on purpose.
+
+    Every entry accepts the finding at its exact tool, rule, path and line. A static-analysis
+    finding also stays accepted when an edit above it moves the line: semgrep reports the line
+    it parsed, so inserting a few lines near the top of a file re-numbers every finding below
+    it, and an exact-only baseline turns that edit into a red gate over code nobody touched
+    (measured: three accepted `actions/checkout@v7` and `actions/cache@v6` uses in release.yml,
+    reported as new after a five-line insertion above them). For sast the entry keeps accepting
+    one finding with the same tool, rule and path, counted, so a second occurrence of the same
+    rule in the same file still blocks.
+    """
+    exact = {}
+    counted = collections.Counter()
     for entry in entries or []:
         key = (entry.get("tool"), entry.get("rule"), entry.get("path"), entry.get("line") or 0)
-        keys[key] = entry.get("reason") or "(no reason recorded)"
-    return keys
+        exact.setdefault(key, entry.get("reason") or "(no reason recorded)")
+        if entry.get("tool") == "sast":
+            counted[loose_key(entry)] += 1
+    return {"exact": exact, "counted": counted}
 
 
-def apply_baseline(findings, accepted):
+def apply_baseline(findings, slots):
+    exact = slots.get("exact", {})
+    spare = collections.Counter(slots.get("counted", {}))
     for finding in findings:
         key = (finding["tool"], finding["rule"], finding["path"], finding["line"] or 0)
-        if key in accepted:
+        reason = exact.get(key)
+        loose = loose_key(finding) if finding["tool"] == "sast" else None
+        if loose is not None and spare[loose]:
+            # One entry, one finding: an exact match spends the slot as well, so a second
+            # occurrence of the same rule in the same file cannot ride in on the same entry.
+            spare[loose] -= 1
+            if reason is None:
+                reason = "same rule and file as an accepted finding, at a line this change moved"
+        if reason is not None:
             finding["blocking"] = False
-            finding["accepted"] = accepted[key]
+            finding["accepted"] = reason
     return findings
 
 
@@ -193,9 +224,9 @@ def load_baseline(path):
             return {}
         raise
     if isinstance(data, list):
-        return baseline_keys(data)
+        return baseline_slots(data)
     if isinstance(data, dict):
-        return baseline_keys(data.get("accepted"))
+        return baseline_slots(data.get("accepted"))
     raise ReportError(f"baseline: {path}: expected an object with an 'accepted' list")
 
 
