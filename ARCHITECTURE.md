@@ -21,6 +21,8 @@ as `§5.5`.
 | `.github/workflows/self.yml` | This repository calling its own constitution gate on push and PR. Without it the gates could change without ever running. |
 | `scripts/gates/test_gates.py` | Fixture tests for the gates. Every case reproduces a defect review found in a first draft; §5.2 treats a test that *is* the gate as production code. |
 | `hooks/pre-commit` | Local Python pre-commit hook (book.md Art. II layer 0). |
+| `security/` | The local security and quality gate that replaces GitHub Advanced Security (code scanning, secret scanning) and GitHub Code Quality, both dropped for cost on 2026-11-20. `bootstrap.sh` installs gitleaks, semgrep, osv-scanner and lizard pinned and checksummed; `scan.sh` runs them and fails on blocking findings. See `security/README.md`. |
+| `.github/workflows/security-local.yml` | The reusable security gate. A repository calls it instead of enabling a GitHub security feature, so the check needs no paid licence and no repository setting. |
 | `runner-images/vela-linux/` | The image, Helm values and deploy script for the `vela-linux` ARC scale set (ephemeral k3s runners on vela). Infrastructure the workflows run on, not a workflow. |
 | `runner-images/vela-ci/` | The same three files for the `vela-ci` scale set, which exists for vega-agent's `CI test` job: the pod is the pinned Playwright image with the runner agent added (ARC has no container mode). Kept apart from `vela-linux`, which serves other repositories and has no browser. |
 | `runner-images/vela-legacy-labels/` | Helm values and deploy script for a disposable scale set that runs the `vela-linux` image and answers the labels vela's persistent systemd runners carried (`cost-linux-secure`, `cost-linux`). It is a separate object because ARC registers a scale set's labels once, at creation: editing them on `vela-linux` would mean recreating the org's busiest scale set. Delete it when those callers move to `vela-linux`. |
@@ -43,6 +45,14 @@ python3 scripts/gates/architecture_doc.py --repo . --base-ref origin/main
 python3 scripts/gates/commit_trailers.py --repo . --range origin/main..HEAD
 python3 scripts/gates/workflow_integrity.py --repo .
 python3 scripts/gates/test_gates.py
+```
+
+The security gate is runnable the same way (it installs its own pinned tools first):
+
+```bash
+bash security/bootstrap.sh
+bash security/scan.sh --repo ~/dev/de-artifact            # whole history and tree
+bash security/scan.sh --repo . --profile pr --base origin/main
 ```
 
 ## Invariants
@@ -117,3 +127,17 @@ python3 scripts/gates/test_gates.py
   name must not become a second output line. A test pins both.
 - **`python-ci.yml` is now able to fail.** A repository that passed it before 2026-08-30
   passed nothing. Expect first red runs to be real findings, not regressions.
+- **The security gate does not follow invariant 3.** `security/scan.sh` needs gitleaks,
+  semgrep and osv-scanner, so it bootstraps them instead of depending on Python and git alone.
+  It is deliberately not part of the constitution gate, which must run on a bare runner before
+  any dependency exists.
+- **The CodeQL CLI is not a fallback for the security gate.** Its licence
+  (`~/.local/opt/codeql/LICENSE.md`) allows the command-line toolchain without a paid Advanced
+  Security licence only for academic research, demos, testing OSI-licensed queries and analysis
+  of an OSI-licensed codebase, and forbids generating a database for CI/CD. Every Intrect
+  repository is private, so `de-artifact`'s `codeql` job was removed on 2026-11-20 with the
+  GHAS subscription. Any other `codeql` script in the organisation needs the same replacement.
+- **`osv-scanner -r` walks worktrees.** A checkout with `worktrees/` or `.worktrees/` inside it
+  produces the same lockfile dozens of times (measured on de-artifact 2026-11-20: 34 MB of JSON
+  from two worktrees). `scan.sh` scans a `git archive HEAD` export instead, which is the tracked
+  tree only.

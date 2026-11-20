@@ -1,0 +1,98 @@
+# Reusable local security gate: secrets, static analysis and dependencies, without any paid
+# GitHub feature.
+#
+# Why this exists: GitHub Advanced Security (code scanning, secret scanning) and GitHub Code
+# Quality are dropped on 2026-11-20 for cost. The tools this workflow runs are free for private
+# commercial use and run on our own runners, so the gate costs nothing and by construction cannot
+# depend on a repository's Advanced Security setting. See ci-templates/security/README.md.
+#
+# The caller keeps this job out of `needs:` of anything else unless it wants to block on it; it is
+# meant to be a required check on the default branch.
+#
+# Profile:
+#   pull_request -> --profile pr:   the BASE..HEAD range for secrets, only the changed files for
+#                                   static analysis. Fast, and nothing else can fail the run.
+#   anything else -> --profile full: the whole history and the whole tracked tree. This is the
+#                                   run that catches what a pull request never touched.
+#
+# tools-ref: the ci-templates ref holding security/. It follows the branch under test on a pull
+# request, so a change to a rule is judged by the rules it proposes (same idea as self.yml's
+# gates-ref).
+
+name: Security (local gate)
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: 'pr (changed files) or full (whole history and tree)'
+        type: string
+        default: pr
+      base-ref:
+        description: 'commit the pull-request range is measured from'
+        type: string
+        default: origin/main
+      tools-ref:
+        description: 'ci-templates ref holding security/'
+        type: string
+        default: main
+      quality:
+        description: 'also write the report-only complexity and copy/paste metrics'
+        type: boolean
+        default: false
+      runs-on:
+        description: 'runner label; vela-linux carries the toolchain'
+        type: string
+        default: vela-linux
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: 'security: secrets, sast, dependencies'
+    runs-on: ${{ inputs.runs-on }}
+    # Measured 2026-11-20 on vela-linux: gitleaks over de-artifact's full history 12 s, semgrep
+    # over the tracked tree 6 min, osv-scanner 20 s. 30 minutes leaves room for a cold semgrep
+    # rule cache without turning a hang into a silent pass.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The secret pass reads history (`--all` on a push, BASE..HEAD on a pull request).
+          fetch-depth: 0
+
+      - name: Check out the gate scripts
+        uses: actions/checkout@v7
+        with:
+          repository: unohee/ci-templates
+          ref: ${{ inputs.tools-ref }}
+          path: .ci-templates
+
+      - name: Fetch the base commit
+        if: inputs.profile == 'pr'
+        run: git fetch --no-tags --depth=1 origin "+refs/heads/*:refs/remotes/origin/*"
+
+      - name: Install the pinned scanners
+        env:
+          SECURITY_TOOLS_DIR: ${{ runner.temp }}/security-tools
+        run: bash .ci-templates/security/bootstrap.sh
+
+      - name: Scan
+        env:
+          SECURITY_TOOLS_DIR: ${{ runner.temp }}/security-tools
+        run: |
+          set -o pipefail
+          args=(--repo . --profile "${{ inputs.profile }}" --out "$RUNNER_TEMP/security-summary.json")
+          [ "${{ inputs.profile }}" = pr ] && args+=(--base "${{ inputs.base-ref }}")
+          [ "${{ inputs.quality }}" = true ] && args+=(--quality)
+          bash .ci-templates/security/scan.sh "${args[@]}"
+
+      - name: Keep the finding summary
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: security-summary
+          path: ${{ runner.temp }}/security-summary.json
+          if-no-files-found: ignore
+          retention-days: 14

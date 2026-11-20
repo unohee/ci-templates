@@ -138,6 +138,54 @@ A pull request that touches only `skip-paths` still gets a green job; its summar
 tests did not run. A change the classifier cannot read, an empty diff and any path not
 matched by a glob all run the tests.
 
+## Security and quality gate — the replacement for GitHub Advanced Security
+
+GitHub Advanced Security (code scanning, secret scanning, push protection) and GitHub Code
+Quality are dropped on 2026-11-20 for cost. `security/` runs the free replacements locally and
+on our own runners: **gitleaks** for secrets, **semgrep** for static analysis, **osv-scanner**
+for dependency vulnerabilities, **lizard** for report-only complexity. Nothing is uploaded to a
+GitHub security feature, so the gate works with every repository setting switched off and costs
+nothing to run. Details, including why the CodeQL CLI is not an option, are in
+[`security/README.md`](security/README.md).
+
+```yaml
+# .github/workflows/security.yml
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Same concurrency rule as the constitution caller: only a pull request is cancelled by a
+# newer commit; a push gets a group of its own so its commits are still checked.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  security:
+    uses: unohee/ci-templates/.github/workflows/security-local.yml@main
+```
+
+Inputs: `profile` (`pr` narrows to the pull-request range and the changed files, `full` reads the
+whole history and tree), `base-ref` (default `origin/main`), `tools-ref` (which ci-templates ref
+holds `security/`), `quality` (adds the report-only metrics), `runs-on` (default `vela-linux`).
+
+Locally, the same gate:
+
+```bash
+bash security/bootstrap.sh                          # install the pinned scanners
+bash security/scan.sh --repo ~/dev/de-artifact      # whole history and tree
+bash security/scan.sh --repo . --profile pr --base origin/main
+```
+
+Exit codes match the gates: `0` clean, `1` blocking findings, `2` a tool or report could not be
+used. A finding the repository accepts goes into its `security/baseline.json` with a reason.
+
 ## Local hook
 
 ```bash
