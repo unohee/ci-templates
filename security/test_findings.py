@@ -149,6 +149,22 @@ class Gate(unittest.TestCase):
         self.assertIn("non-fatal warning", out)
         self.assertIn("Internal matching error", out)
 
+    def test_sast_warning_with_a_value_list_type_stays_short(self) -> None:
+        """semgrep sets `type` to the rule's value list for a partial parse.
+
+        Printing it whole put 15 KB of source into the log (de-artifact, 2026-11-20: 79 entries),
+        which buries the finding table. Only the name survives.
+        """
+        warning = {
+            "level": "warn",
+            "type": ["PartialParsing", [{"path": "x.yml", "start": {"line": 1, "col": 1}}]],
+        }
+        code, out, _ = run({"semgrep": semgrep([], errors=[warning])})
+        self.assertEqual(code, 0, out)
+        note = next(line for line in out.splitlines() if "non-fatal warning" in line)
+        self.assertIn("PartialParsing x1", note)
+        self.assertLess(len(note), 120, note)
+
     def test_dependency_vulnerability_blocks(self) -> None:
         code, out, _ = run({"osv": osv([osv_entry()])})
         self.assertEqual(code, 1, out)

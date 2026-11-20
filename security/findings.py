@@ -72,6 +72,22 @@ def gitleaks_findings(path, root):
     return out
 
 
+def error_kind(error):
+    """A short name for one entry of semgrep's `errors` array.
+
+    `type` is normally a string ("Internal matching error"), but semgrep sets it to the rule's
+    value list when the warning came from a pattern: element 0 is the name and the rest is the
+    offending source. Printing that whole thing put 15 KB of parse detail into the log on
+    de-artifact (79 entries, 2026-11-20), so only the name is kept.
+    """
+    kind = error.get("type")
+    if isinstance(kind, str):
+        return kind[:60] or "unnamed"
+    if isinstance(kind, (list, tuple)) and kind and isinstance(kind[0], str):
+        return kind[0][:60]
+    return "unnamed"
+
+
 def semgrep_findings(path, root):
     """Returns (findings, notes). A fatal error raises; a warning becomes a note.
 
@@ -93,7 +109,7 @@ def semgrep_findings(path, root):
     if errors:
         kinds = {}
         for error in errors:
-            kinds[str(error.get("type"))] = kinds.get(str(error.get("type")), 0) + 1
+            kinds[str(error_kind(error))] = kinds.get(str(error_kind(error)), 0) + 1
         summary = ", ".join(f"{name} x{count}" for name, count in sorted(kinds.items()))
         notes.append(f"semgrep recorded {len(errors)} non-fatal warning(s): {summary}")
     out = []
