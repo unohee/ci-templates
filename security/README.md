@@ -88,7 +88,11 @@ names it exactly and says why:
 ```
 
 A baseline entry accepts that one tool+rule+path+line. A different vulnerability in the same file
-still blocks.
+still blocks. A static-analysis entry also keeps accepting one finding with the same rule and file
+after a later edit moves its line: semgrep reports the line it parsed, so an insertion above
+re-numbers everything below it, and an exact-line-only rule would turn that edit into a red gate
+over code nobody touched. The count stays one entry per finding, so a second occurrence of the same
+rule in the same file still blocks.
 
 `security/baseline.json` is read automatically when it exists, both locally and in CI, so a
 repository does not have to pass `--baseline` (and the reusable workflow does not). To record the
