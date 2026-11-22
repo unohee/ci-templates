@@ -22,7 +22,12 @@ HERE = Path(__file__).resolve().parent
 SCRIPT = HERE / "findings.py"
 
 
-def run(reports: dict[str, object], baseline: object | None = None) -> tuple[int, str, dict]:
+def run(
+    reports: dict[str, object],
+    baseline: object | None = None,
+    secret_paths: list[str] | None = None,
+    extra: list[str] | None = None,
+) -> tuple[int, str, dict]:
     """Write the given reports to a temp dir, run the gate, return (exit, stdout, summary)."""
     with tempfile.TemporaryDirectory() as tmp:
         paths = {}
@@ -38,6 +43,11 @@ def run(reports: dict[str, object], baseline: object | None = None) -> tuple[int
             baseline_path = Path(tmp) / "baseline.json"
             baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
             cmd += ["--baseline", str(baseline_path)]
+        if secret_paths is not None:
+            list_path = Path(tmp) / "changed-paths.txt"
+            list_path.write_text("\n".join(secret_paths) + "\n", encoding="utf-8")
+            cmd += ["--secret-paths", str(list_path)]
+        cmd += extra or []
         proc = subprocess.run(cmd, capture_output=True, check=False)
         summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
         return proc.returncode, proc.stdout.decode(), summary
@@ -112,6 +122,35 @@ class Gate(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertNotIn(secret, out)
         self.assertNotIn(secret, json.dumps(summary))
+
+    def test_secret_pass_can_be_limited_to_the_changed_files(self) -> None:
+        """A pull request is judged on the files it changes.
+
+        A merge commit in the range carries the base branch's copy of every file it merges, so a
+        token the base branch moved to a new line reports for a file the change never touched
+        (intrect-platform PR #1781).
+        """
+        changed = {"RuleID": "generic-api-key", "Description": "Generic", "File": "app.py", "StartLine": 3}
+        untouched = {
+            "RuleID": "generic-api-key",
+            "Description": "Generic",
+            "File": "docs/record.json",
+            "StartLine": 2,
+        }
+        code, out, summary = run({"gitleaks": gitleaks([changed, untouched])}, secret_paths=["app.py"])
+        self.assertEqual(code, 1, out)
+        self.assertIn("app.py", out)
+        self.assertNotIn("docs/record.json", out)
+        self.assertEqual(summary["total"], 1)
+
+    def test_secret_paths_do_not_narrow_the_other_tools(self) -> None:
+        code, out, _ = run({"semgrep": semgrep([semgrep_result("ERROR")])}, secret_paths=["app.py"])
+        self.assertEqual(code, 1, out)
+
+    def test_a_secret_paths_file_that_cannot_be_read_is_not_clean(self) -> None:
+        """A filter that silently disappears would turn the gate into decoration."""
+        code, out, _ = run({"gitleaks": gitleaks([])}, extra=["--secret-paths", "/nope/list.txt"])
+        self.assertEqual(code, 2, out)
 
     def test_sast_error_blocks(self) -> None:
         code, out, _ = run({"semgrep": semgrep([semgrep_result("ERROR")])})

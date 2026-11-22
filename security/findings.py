@@ -9,10 +9,13 @@
 # Test Status: security/test_findings.py.
 #
 #   python3 security/findings.py --gitleaks F.json --semgrep F.json --osv F.json \
-#       [--baseline security/baseline.json] [--summary F.json] [--root DIR] [--tool NAME]...
+#       [--baseline security/baseline.json] [--summary F.json] [--root DIR] \
+#       [--secret-paths F] [--tool NAME]...
 #
 # Gate policy (one sentence per line, the reasons in security/README.md):
-#   secret   every finding blocks; a baseline entry with a reason accepts one.
+#   secret   every finding blocks; a baseline entry with a reason accepts one. With
+#            --secret-paths only the files named there report, which is how a pull request is
+#            judged on the files it changes.
 #   sast     a result blocks at severity ERROR, and at WARNING when the rule declares
 #            metadata.confidence: high (an error-only gate let a js/xss-through-dom
 #            warning with security-severity 7.8 through; see AUD-3009). A baseline entry
@@ -52,19 +55,27 @@ def load(path, what):
         raise ReportError(f"{what}: {path}: {error}") from error
 
 
-def gitleaks_findings(path, root):
-    """gitleaks json is a flat list of leaks. The secret value is never kept."""
+def gitleaks_findings(path, root, only_paths=None):
+    """gitleaks json is a flat list of leaks. The secret value is never kept.
+
+    `only_paths` is a set of repository-relative paths (or None): a pull request reads its own
+    change range, and a merge commit in that range carries the base branch's copy of every file it
+    merges, so a token the base branch moved is reported for a file the change never touched.
+    """
     data = load(path, "gitleaks")
     if not isinstance(data, list):
         raise ReportError(f"gitleaks: {path}: expected a list of findings")
     out = []
     for leak in data:
+        where = rel(leak.get("File"), root)
+        if only_paths is not None and where not in only_paths:
+            continue
         out.append(
             {
                 "tool": "secret",
                 "severity": "error",
                 "rule": leak.get("RuleID") or "unknown-rule",
-                "path": rel(leak.get("File"), root),
+                "path": where,
                 "line": leak.get("StartLine") or 0,
                 # Description, not Secret/Match: a finding report must never carry the
                 # secret itself into a CI log or a Slack channel.
@@ -73,6 +84,15 @@ def gitleaks_findings(path, root):
             }
         )
     return out
+
+
+def read_path_list(path, what):
+    """One relative path per line; a list that cannot be read is an error, not an empty filter."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return {line.strip() for line in handle if line.strip()}
+    except OSError as error:
+        raise ReportError(f"{what}: {path}: {error}") from error
 
 
 def error_kind(error):
@@ -302,6 +322,10 @@ def main(argv=None):
     parser.add_argument("--summary")
     parser.add_argument("--root", default=".")
     parser.add_argument(
+        "--secret-paths",
+        help="only report secrets in the files named in this file (a pull request's changed files)",
+    )
+    parser.add_argument(
         "--write-baseline",
         metavar="FILE",
         help="record today's blocking findings as accepted; needs --baseline-reason",
@@ -317,7 +341,10 @@ def main(argv=None):
     try:
         findings = []
         if args.gitleaks:
-            findings += gitleaks_findings(args.gitleaks, args.root)
+            only_paths = (
+                read_path_list(args.secret_paths, "secret-paths") if args.secret_paths else None
+            )
+            findings += gitleaks_findings(args.gitleaks, args.root, only_paths)
         if args.semgrep:
             sast, notes = semgrep_findings(args.semgrep, args.root)
             findings += sast
