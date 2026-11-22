@@ -137,13 +137,16 @@ else
   bad "full semgrep scans the export" "(no /src target)"
 fi
 
-# 7. The full profile reads the whole history; the pull-request profile reads the range.
+# 7. The full profile reads the whole history; the pull-request profile reads the exported tree, the
+#    same revision the baseline describes, so a token the base branch moved to a new line is not
+#    judged at the line it had when the branch was cut.
 : > "$work/args/gitleaks"
 run_scan
 contains "full gitleaks reads --all" "$(cat "$work/args/gitleaks")" "--log-opts=--all"
 : > "$work/args/gitleaks"
 run_scan --profile pr --base HEAD~1
-contains "pr gitleaks reads the range" "$(cat "$work/args/gitleaks")" "--log-opts=HEAD~1..HEAD"
+contains "pr gitleaks reads the export" "$(cat "$work/args/gitleaks")" "dir "
+missing "pr gitleaks drops the commit range" "$(cat "$work/args/gitleaks")" "--log-opts"
 
 # 8. A repository baseline at security/baseline.json is used without being asked for: the planted
 #    secret passes once it is recorded as accepted. This is what keeps a first adoption from

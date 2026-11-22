@@ -16,7 +16,8 @@
 #        --baseline-reason "pre-existing before the gate was adopted (AUD-nnnn)"   # first run
 #
 # What runs:
-#   secrets  gitleaks over the git history (full) or over BASE..HEAD (pr). Reports never carry
+#   secrets  gitleaks over the git history (full) or over an export of the tracked files at HEAD
+#            (pr), the same revision the baseline describes. Reports never carry
 #            the secret value (--redact; findings.py keeps the description only).
 #   sast     semgrep over an export of the tracked files at HEAD (`git archive HEAD`), so
 #            worktrees, target/, build output and untracked copies are never scanned.
@@ -96,11 +97,23 @@ log="$work/scan.log"
 status=0
 
 # --- secrets ----------------------------------------------------------------------
-secret_range="--all"
-[ "$profile" = pr ] && secret_range="$base..HEAD"
-echo "scan: gitleaks ($profile: $secret_range)"
-gitleaks_args=(git "$root" --log-opts="$secret_range" --report-format=json
-               --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color)
+# A pull request reads the exported tree, the same revision the baseline describes (the baseline
+# is read from the repository checkout). Reading BASE..HEAD instead judges the branch's copy of
+# every file the branch does not touch, so a token the base branch moved to a new line after the
+# branch was cut is reported at the line it had when the branch started, where no accepted entry
+# covers it (measured 2026-11-22: two accepted public tokens on web/landing/pricing/index.html
+# failed intrect-platform PR #1781 while main was green). A secret the pull request adds is in
+# the tree and still blocks. The full profile keeps reading the whole history, which is where a
+# secret that was deleted again shows up.
+if [ "$profile" = pr ]; then
+  echo "scan: gitleaks (pr: the exported tree at HEAD)"
+  gitleaks_args=(dir "$src" --report-format=json
+                 --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color)
+else
+  echo "scan: gitleaks (full: --all)"
+  gitleaks_args=(git "$root" --log-opts="--all" --report-format=json
+                 --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color)
+fi
 # A repository may narrow the rules next to the shared set, like security/semgrep.yml. Without
 # --config gitleaks only looks for .gitleaks.toml at the repository root, so passing it explicitly
 # keeps a local run and the workflow on the same rules.
