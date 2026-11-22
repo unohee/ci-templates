@@ -9,7 +9,7 @@ runners, so a scan costs nothing and never waits on a GitHub-hosted minute.
 
 | Dropped | Replacement | Licence | Runs |
 |---|---|---|---|
-| GitHub secret scanning + push protection | `gitleaks` over the history or the pull-request range | MIT | `scan.sh`, `security-local.yml` |
+| GitHub secret scanning + push protection | `gitleaks` over the history, or over an export of the tracked files on a pull request | MIT | `scan.sh`, `security-local.yml` |
 | CodeQL code scanning | `semgrep` (`p/default`) over an export of the tracked files | LGPL-2.1 engine, Semgrep Rules License for the registry rules (internal use) | `scan.sh`, `security-local.yml` |
 | Dependabot alerts | `osv-scanner` over every lockfile in the tree | Apache-2.0 | `scan.sh`, `security-local.yml` |
 | GitHub Code Quality (maintainability) | `clippy` / `ruff` / `eslint` / `tsc` (already in each repository) plus a `lizard` complexity and copy/paste report | MIT | `scan.sh --quality` |
@@ -51,7 +51,7 @@ bash security/bootstrap.sh
 # Whole repository: history, tracked tree, lockfiles
 bash security/scan.sh --repo ~/dev/de-artifact
 
-# Pull-request pass: only the range and the changed files
+# Pull-request pass: the exported tree for secrets, the changed files for sast
 bash security/scan.sh --repo . --profile pr --base origin/main
 
 # Add the report-only quality metrics
@@ -127,9 +127,16 @@ jobs:
     uses: unohee/ci-templates/.github/workflows/security-local.yml@main
 ```
 
-It runs on the `vela-linux` scale set, exports the pull request's merge commit, and reads the
-pull-request range for the secret pass. Nothing is uploaded to GitHub's security features; the
-summary is written to the job log and kept as a runner-local artifact.
+It runs on the `vela-linux` scale set, exports the pull request's merge commit, and reads that
+export for the secret and dependency passes and the changed files for the static-analysis pass.
+Nothing is uploaded to GitHub's security features; the summary is written to the job log and kept
+as a runner-local artifact.
+
+The secret pass reads the export rather than the `BASE..HEAD` commits on purpose: a baseline entry
+names a line in the tree being tested, and a commit in the range carries the branch's copy of every
+file the branch never touched, so a token the base branch moved to a new line is reported at its
+old line and no accepted entry matches it. Reading one revision for both sides removes that whole
+class of false block; a secret the pull request adds is in the export and still blocks.
 
 ## Files
 
