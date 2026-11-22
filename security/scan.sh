@@ -16,8 +16,8 @@
 #        --baseline-reason "pre-existing before the gate was adopted (AUD-nnnn)"   # first run
 #
 # What runs:
-#   secrets  gitleaks over the git history (full) or over an export of the tracked files at HEAD
-#            (pr), the same revision the baseline describes. Reports never carry
+#   secrets  gitleaks over the git history (full) or over the change range on a pull request,
+#            limited to the files that change touches. Reports never carry
 #            the secret value (--redact; findings.py keeps the description only).
 #   sast     semgrep over an export of the tracked files at HEAD (`git archive HEAD`), so
 #            worktrees, target/, build output and untracked copies are never scanned.
@@ -97,17 +97,17 @@ log="$work/scan.log"
 status=0
 
 # --- secrets ----------------------------------------------------------------------
-# A pull request reads the exported tree, the same revision the baseline describes (the baseline
-# is read from the repository checkout). Reading BASE..HEAD instead judges the branch's copy of
-# every file the branch does not touch, so a token the base branch moved to a new line after the
-# branch was cut is reported at the line it had when the branch started, where no accepted entry
-# covers it (measured 2026-11-22: two accepted public tokens on web/landing/pricing/index.html
-# failed intrect-platform PR #1781 while main was green). A secret the pull request adds is in
-# the tree and still blocks. The full profile keeps reading the whole history, which is where a
-# secret that was deleted again shows up.
+# A pull request reads its own change range, and only in the files that change is in. A merge
+# commit in the range carries the base branch's copy of every file it merges, so a token the base
+# branch had already moved to a new line was reported at the line it had when the branch started,
+# where no accepted entry covers it (measured 2026-11-22: two accepted public tokens on
+# web/landing/pricing/index.html failed intrect-platform PR #1781 while main was green and the
+# pull request never changed that file). A secret the change adds is in a changed file and still
+# blocks. The full profile keeps reading the whole history, which is where a secret that was
+# deleted again shows up.
 if [ "$profile" = pr ]; then
-  echo "scan: gitleaks (pr: the exported tree at HEAD)"
-  gitleaks_args=(dir "$src" --report-format=json
+  echo "scan: gitleaks (pr: $base..HEAD, limited to the files this change touches)"
+  gitleaks_args=(git "$root" --log-opts="$base..HEAD" --report-format=json
                  --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color)
 else
   echo "scan: gitleaks (full: --all)"
@@ -184,10 +184,19 @@ fi
 # --- gate -------------------------------------------------------------------------
 summary="$work/summary.json"
 [ -n "$out" ] && summary="$out"
+# A pull request is judged on the files it changes; the secret pass reads that list so a file the
+# change never touched cannot report (see the block above the secret pass). The static-analysis
+# pass narrows to the same changed files further down.
+secret_paths=""
+if [ "$profile" = pr ]; then
+  secret_paths="$work/changed-paths.txt"
+  git -C "$root" diff --name-only --diff-filter=ACMR "$base...HEAD" > "$secret_paths"
+fi
 # --root is $src, the exported tree: that is what the scanners report from, so a baseline entry
 # written from this run names the same path a later run will see.
 gate_args=(--summary "$summary" --root "$src"
            --gitleaks "$work/gitleaks.json" --semgrep "$work/semgrep.json" --osv "$work/osv.json")
+[ -n "$secret_paths" ] && gate_args+=(--secret-paths "$secret_paths")
 [ -n "$baseline" ] && gate_args+=(--baseline "$baseline")
 if [ -n "$write_baseline" ]; then
   [ -n "$baseline_reason" ] || {

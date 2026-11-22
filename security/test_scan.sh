@@ -137,16 +137,27 @@ else
   bad "full semgrep scans the export" "(no /src target)"
 fi
 
-# 7. The full profile reads the whole history; the pull-request profile reads the exported tree, the
-#    same revision the baseline describes, so a token the base branch moved to a new line is not
-#    judged at the line it had when the branch was cut.
+# 7. The full profile reads the whole history. The pull-request profile reads the change range and
+#    reports only the files the change touches: a merge commit in the range carries the base
+#    branch's copy of every file it merges, so a token the base branch moved to a new line would
+#    otherwise be judged at the line it had when the branch was cut (intrect-platform PR #1781).
 : > "$work/args/gitleaks"
 run_scan
 contains "full gitleaks reads --all" "$(cat "$work/args/gitleaks")" "--log-opts=--all"
 : > "$work/args/gitleaks"
 run_scan --profile pr --base HEAD~1
-contains "pr gitleaks reads the export" "$(cat "$work/args/gitleaks")" "dir "
-missing "pr gitleaks drops the commit range" "$(cat "$work/args/gitleaks")" "--log-opts"
+contains "pr gitleaks reads the change range" "$(cat "$work/args/gitleaks")" "--log-opts=HEAD~1..HEAD"
+missing "pr gitleaks does not read the whole history" "$(cat "$work/args/gitleaks")" "--log-opts=--all"
+
+# 7b. A secret in a file the change does not touch does not block a pull request, and one in a
+#     changed file still does.
+leak() { printf '[{"RuleID":"generic-api-key","Description":"Generic API Key","File":"%s","StartLine":1,"Secret":"s","Match":"x"}]' "$1"; }
+STUB_GITLEAKS_JSON="$(leak app.py)" run_scan --profile pr --base HEAD~1
+expect_exit "a secret in a changed file blocks the pull request" 1
+STUB_GITLEAKS_JSON="$(leak docs/record.json)" run_scan --profile pr --base HEAD~1
+expect_exit "a secret in a file the change never touches does not block it" 0
+STUB_GITLEAKS_JSON="$(leak docs/record.json)" run_scan
+expect_exit "the same secret blocks the full profile" 1
 
 # 8. A repository baseline at security/baseline.json is used without being asked for: the planted
 #    secret passes once it is recorded as accepted. This is what keeps a first adoption from
