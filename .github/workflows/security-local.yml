@@ -71,7 +71,11 @@ jobs:
 
       - name: Fetch the base commit
         if: inputs.profile == 'pr'
-        run: git fetch --no-tags --depth=1 origin "+refs/heads/*:refs/remotes/origin/*"
+        # Never `--depth=1` here. A shallow fetch grafts the base tip, which cuts its ancestors,
+        # and `git merge-base` then reports "no merge base" for every branch that is behind the
+        # base — so the gate dies on a git error instead of reporting a finding (AUD-3071). The
+        # base is one branch and the checkout above is already full, so fetching it whole is cheap.
+        run: bash .ci-templates/security/fetch_base.sh "${{ inputs.base-ref }}"
 
       - name: Install the pinned scanners
         env:

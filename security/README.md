@@ -127,6 +127,11 @@ jobs:
     uses: unohee/ci-templates/.github/workflows/security-local.yml@main
 ```
 
+The base ref is fetched whole, never shallow. A depth-1 fetch grafts the base tip, and a grafted
+commit has no parents, so `git merge-base` reports "no merge base" for every branch that is behind
+the base — the normal state of a pull request. `fetch_base.sh` fetches the one branch it needs and
+fails with a clear message if the base still cannot be reached (AUD-3071).
+
 It runs on the `vela-linux` scale set, exports the pull request's merge commit, and reads that
 export for the dependency pass and the static-analysis pass. Nothing is uploaded to GitHub's
 security features; the summary is written to the job log and kept as a runner-local artifact.
@@ -149,3 +154,5 @@ branch keeps reading the whole history, which is where a secret that was deleted
 | `findings.py` | reads the three reports, applies the baseline, decides the exit code, prints the table |
 | `test_findings.py` | unit tests for the gate decisions (no network) |
 | `test_scan.sh` | wiring tests with stub tools (no network): missing tool, planted leak, pull-request narrowing |
+| `fetch_base.sh` | fetches a pull request's base ref with its whole history, so `git merge-base` can find where the branch started |
+| `test_fetch_base.sh` | tests that fetch (no network): a shallow fetch loses the merge base, the script keeps it |
