@@ -2,9 +2,15 @@
 # Replaces the systemd runners rtx-rust-ci-1/2 for de-leak-rt, patina and intrect-plugin.
 # Sizing comes from hosts/vela/rust-ci/50-rust-ci-isolation.conf (CPUQuota 400%, MemoryMax 9G
 # per runner, two runners); the largest measured job peaked at 5.8 GiB.
+# maxRunners 3 (2026-11-25): with 2 slots the scaler sat at "assigned job=2 decision=2 max=2"
+# all afternoon and de-leak-rt jobs waited 60-224 min (worst: cargo-audit 209.8 min, test
+# 181.4 min). Namespace quota had room (pods 4/14, requests.cpu 3.15/13, requests.memory
+# 6.85/24Gi), so a third slot costs 1 cpu / 2Gi of requests. Deployed 2026-11-26 02:01 KST
+# as a values-only upgrade in an empty window (no runner pod, queue 0 in de-leak-rt,
+# patina, intrect-plugin); revision 5, image unchanged.
 githubConfigSecret: arc-github-app
 githubConfigUrl: https://github.com/Intrect-io
-maxRunners: 2
+maxRunners: 3
 minRunners: 0
 runnerGroup: vela-k3s
 runnerScaleSetName: vela-rust-ci
