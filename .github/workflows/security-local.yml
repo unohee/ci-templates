@@ -100,30 +100,18 @@ jobs:
         run: bash .ci-templates/security/bootstrap.sh
 
       - name: Scan
-        id: scan
         env:
           SECURITY_TOOLS_DIR: ${{ runner.temp }}/security-tools
+          REPORT_ONLY: ${{ inputs.report-only && '1' || '0' }}
         run: |
           set -o pipefail
           args=(--repo . --profile "${{ inputs.profile }}" --out "$RUNNER_TEMP/security-summary.json")
           [ "${{ inputs.profile }}" = pr ] && args+=(--base "${{ inputs.base-ref }}")
           [ -n "${{ inputs.range }}" ] && args+=(--range "${{ inputs.range }}")
           [ "${{ inputs.quality }}" = true ] && args+=(--quality)
-          set +e
-          bash .ci-templates/security/scan.sh "${args[@]}"
-          status=$?
-          set -e
-          if [ "$status" = 0 ]; then
-            exit 0
-          fi
-          # A report-only run never fails: it exists to show what old history still holds, not to
-          # hold a merge. A tooling failure (2) is still a failure whatever the mode, because a
-          # scanner that could not run must never read as a clean scan.
-          if [ "${{ inputs.report-only }}" = true ] && [ "$status" = 1 ]; then
-            echo "report-only: blocking findings above did not fail this run"
-            exit 0
-          fi
-          exit "$status"
+          # The status decision lives in scan_ci.sh: Art. VI forbids disabling errexit in a
+          # workflow, and report-only needs to inspect the code as a value, not act on it.
+          bash .ci-templates/security/scan_ci.sh "${args[@]}"
 
       - name: Write the finding list into the run summary
         if: always() && inputs.report-only

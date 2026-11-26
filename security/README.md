@@ -187,6 +187,8 @@ subject. Two rules keep the narrowing from losing cover:
 | `bootstrap.sh` | installs the tools into one directory, checksum-verified, idempotent (`--check` to report) |
 | `scan.sh` | the scan: secrets, sast, dependencies, optional quality |
 | `findings.py` | reads the three reports, applies the baseline, decides the exit code, prints the table |
+| `scan_ci.sh` | the CI wrapper: turns the scan's exit code into a pass/fail decision (report-only lives here, never as `set +e` in a workflow) |
+| `test_scan_ci.sh` | tests for that decision (stub scan, no network) |
 | `report_summary.py` | renders a summary as markdown for the report-only whole-history audit |
 | `test_report_summary.py` | tests for that renderer (no network) |
 | `test_findings.py` | unit tests for the gate decisions (no network) |
