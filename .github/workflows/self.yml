@@ -53,5 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 -I security/test_findings.py
+      - run: python3 -I security/test_report_summary.py
+      - run: bash security/test_scan_ci.sh
       - run: bash security/test_scan.sh
       - run: bash security/test_fetch_base.sh

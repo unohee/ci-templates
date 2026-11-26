@@ -54,6 +54,9 @@ bash security/scan.sh --repo ~/dev/de-artifact
 # Pull-request pass: the change range for secrets, the changed files for sast
 bash security/scan.sh --repo . --profile pr --base origin/main
 
+# Full profile, but only the commits one push introduced (the CI case)
+bash security/scan.sh --repo . --range "$BEFORE..$AFTER"
+
 # Add the report-only quality metrics
 bash security/scan.sh --repo . --quality
 ```
@@ -141,8 +144,40 @@ matter: a baseline entry names a line, and a merge commit in the range carries t
 copy of every file it merges, so a token the base branch moved to a new line is reported at the
 line it had when the branch started, where no accepted entry matches it. Narrowing to the changed
 files removes that whole class of false block — a file the change never touches cannot be where it
-introduced a secret — and a secret the change adds still blocks. The full profile on the default
-branch keeps reading the whole history, which is where a secret that was deleted again shows up.
+introduced a secret — and a secret the change adds still blocks.
+
+The full profile reads the whole history of the checked-out ref, not every ref in the repository.
+A push to the default branch passes `before..after`, so the scan reads only the commits that push
+introduced:
+
+```yaml
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 20 * * 0'   # Sun 20:00 UTC = Mon 05:00 KST: the whole-history audit
+jobs:
+  security:
+    uses: unohee/ci-templates/.github/workflows/security-local.yml@<pinned sha>
+    with:
+      profile: ${{ github.event_name == 'pull_request' && 'pr' || 'full' }}
+      range: ${{ github.event_name == 'push' && format('{0}..{1}', github.event.before, github.sha) || '' }}
+      report-only: ${{ github.event_name == 'schedule' }}
+```
+
+Measured 2026-11-26 on de-artifact: reading every ref made main's check red on three
+`generic-api-key` hits inside `docs/design/figma-spec/*.md` — files that exist only on an unmerged
+branch. A push cannot introduce what it does not contain, so other branches are not this check's
+subject. Two rules keep the narrowing from losing cover:
+
+- **A range that cannot be measured falls back to the safe side.** When the earlier end is missing
+  (a new branch reports an all-zero tip), is not an ancestor of the later end (a force push that
+  dropped the old tip), or does not exist at all, `scan.sh` reads every commit on the checked-out
+  ref instead. It never shortens the list silently: it prints which fallback it used.
+- **One scheduled run reads everything, and blocks nothing.** `report-only: true` keeps a finding
+  from failing the job; the run summary lists what old history still holds. A tooling failure is
+  still a failure in that mode, because a scanner that could not run must never read as a clean
+  scan.
 
 ## Files
 
@@ -152,6 +187,10 @@ branch keeps reading the whole history, which is where a secret that was deleted
 | `bootstrap.sh` | installs the tools into one directory, checksum-verified, idempotent (`--check` to report) |
 | `scan.sh` | the scan: secrets, sast, dependencies, optional quality |
 | `findings.py` | reads the three reports, applies the baseline, decides the exit code, prints the table |
+| `scan_ci.sh` | the CI wrapper: turns the scan's exit code into a pass/fail decision (report-only lives here, never as `set +e` in a workflow) |
+| `test_scan_ci.sh` | tests for that decision (stub scan, no network) |
+| `report_summary.py` | renders a summary as markdown for the report-only whole-history audit |
+| `test_report_summary.py` | tests for that renderer (no network) |
 | `test_findings.py` | unit tests for the gate decisions (no network) |
 | `test_scan.sh` | wiring tests with stub tools (no network): missing tool, planted leak, pull-request narrowing |
 | `fetch_base.sh` | fetches a pull request's base ref with its whole history, so `git merge-base` can find where the branch started |

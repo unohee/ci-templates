@@ -15,6 +15,10 @@
 #   anything else -> --profile full: the whole history and the whole tracked tree. This is the
 #                                   run that catches what a pull request never touched.
 #
+# `range` narrows the full profile to one push's commits ("before..after"). An unmeasurable range
+# falls back to every commit on the checked-out ref, never to a shorter list. `report-only` keeps a
+# finding from failing the job, for the scheduled whole-history audit (AUD-3008 follow-up).
+#
 # tools-ref: the ci-templates ref holding security/. It follows the branch under test on a pull
 # request, so a change to a rule is judged by the rules it proposes (same idea as self.yml's
 # gates-ref).
@@ -32,6 +36,19 @@ on:
         description: 'commit the pull-request range is measured from'
         type: string
         default: origin/main
+      range:
+        description: >-
+          Optional commit range for the full profile, "<before>..<after>". A push passes
+          github.event.before..github.sha so the scan reads only the commits that push introduced;
+          an unmeasurable range (new branch, dropped tip) falls back to every commit on the ref.
+        type: string
+        default: ''
+      report-only:
+        description: >-
+          Report findings without failing the job. For the weekly whole-history audit, which must
+          tell people what is old without blocking a merge.
+        type: boolean
+        default: false
       tools-ref:
         description: 'ci-templates ref holding security/'
         type: string
@@ -85,12 +102,24 @@ jobs:
       - name: Scan
         env:
           SECURITY_TOOLS_DIR: ${{ runner.temp }}/security-tools
+          REPORT_ONLY: ${{ inputs.report-only && '1' || '0' }}
         run: |
           set -o pipefail
           args=(--repo . --profile "${{ inputs.profile }}" --out "$RUNNER_TEMP/security-summary.json")
           [ "${{ inputs.profile }}" = pr ] && args+=(--base "${{ inputs.base-ref }}")
+          [ -n "${{ inputs.range }}" ] && args+=(--range "${{ inputs.range }}")
           [ "${{ inputs.quality }}" = true ] && args+=(--quality)
-          bash .ci-templates/security/scan.sh "${args[@]}"
+          # The status decision lives in scan_ci.sh: Art. VI forbids disabling errexit in a
+          # workflow, and report-only needs to inspect the code as a value, not act on it.
+          bash .ci-templates/security/scan_ci.sh "${args[@]}"
+
+      - name: Write the finding list into the run summary
+        if: always() && inputs.report-only
+        run: |
+          f="$RUNNER_TEMP/security-summary.json"
+          [ -f "$f" ] || { echo "No summary was written; the scan did not reach its gate." >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          python3 .ci-templates/security/report_summary.py "$f" >> "$GITHUB_STEP_SUMMARY" \
+            || echo "The summary could not be rendered; see the security-summary artifact." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the finding summary
         if: always()
