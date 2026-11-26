@@ -11,6 +11,7 @@
 #
 #   bash security/scan.sh --repo ~/dev/de-artifact                 # full: history, whole tree
 #   bash security/scan.sh --repo . --profile pr --base origin/main  # pull-request pass
+#   bash security/scan.sh --repo . --range "$BEFORE..$AFTER"         # full: only what a push added
 #   bash security/scan.sh --repo . --quality                        # add the quality report
 #   bash security/scan.sh --repo . --write-baseline security/baseline.json \
 #        --baseline-reason "pre-existing before the gate was adopted (AUD-nnnn)"   # first run
@@ -35,6 +36,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo=""
 profile="full"
 base=""
+range=""
+range_fell_back=0
 out=""
 tools_dir="${SECURITY_TOOLS_DIR:-$HOME/.local/share/intrect-security}"
 baseline=""
@@ -47,6 +50,7 @@ while [ "$#" -gt 0 ]; do
     --repo) repo="$2"; shift 2 ;;
     --profile) profile="$2"; shift 2 ;;
     --base) base="$2"; shift 2 ;;
+    --range) range="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
     --tools-dir) tools_dir="$2"; shift 2 ;;
     --baseline) baseline="$2"; shift 2 ;;
@@ -63,6 +67,29 @@ done
 case "$profile" in full|pr) ;; *) echo "scan: --profile must be full or pr" >&2; exit 2 ;; esac
 root="$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null)" \
   || { echo "scan: $repo is not a git working tree" >&2; exit 2; }
+
+# --range narrows the full profile to the commits one push introduced (AUD-3008 follow-up,
+# approved 2026-11-26). Without it, a push to main was judged against every ref: content that
+# exists only on an unmerged branch turned main's check red (measured 2026-11-26 on de-artifact:
+# three generic-api-key hits in docs/design/figma-spec/*.md, files that are not in main's tree).
+# The range is a usable measurement only when both ends exist and the earlier one is an ancestor
+# of the later one. A new branch (before is all zeros), a force push that dropped the old tip, or a
+# typo leaves nothing to measure, and the scan then reads every commit on the checked-out ref —
+# the safe side, never a shorter list.
+if [ -n "$range" ]; then
+  range_before="${range%%..*}"
+  range_after="${range##*..}"
+  if [ -n "$range_before" ] && [ -n "$range_after" ] \
+     && git -C "$root" cat-file -e "${range_before}^{commit}" 2>/dev/null \
+     && git -C "$root" cat-file -e "${range_after}^{commit}" 2>/dev/null \
+     && git -C "$root" merge-base --is-ancestor "$range_before" "$range_after" 2>/dev/null; then
+    :
+  else
+    echo "scan: $range is not a commit range in this repository; reading every commit on the checked-out ref" >&2
+    range=""
+    range_fell_back=1
+  fi
+fi
 
 # A repository records the findings it has accepted in security/baseline.json (see README). Using
 # it by default keeps a local run and the reusable workflow on the same judgement: the workflow
@@ -108,6 +135,14 @@ status=0
 if [ "$profile" = pr ]; then
   echo "scan: gitleaks (pr: $base..HEAD, limited to the files this change touches)"
   gitleaks_args=(git "$root" --log-opts="$base..HEAD" --report-format=json
+                 --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color)
+elif [ -n "$range" ]; then
+  echo "scan: gitleaks (push: $range)"
+  gitleaks_args=(git "$root" --log-opts="$range" --report-format=json
+                 --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color)
+elif [ "$range_fell_back" = 1 ]; then
+  echo "scan: gitleaks (push range unusable: every commit on HEAD)"
+  gitleaks_args=(git "$root" --log-opts="HEAD" --report-format=json
                  --report-path="$work/gitleaks.json" --exit-code=0 --no-banner --redact --no-color)
 else
   echo "scan: gitleaks (full: --all)"

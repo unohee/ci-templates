@@ -149,6 +149,26 @@ run_scan --profile pr --base HEAD~1
 contains "pr gitleaks reads the change range" "$(cat "$work/args/gitleaks")" "--log-opts=HEAD~1..HEAD"
 missing "pr gitleaks does not read the whole history" "$(cat "$work/args/gitleaks")" "--log-opts=--all"
 
+# 7c. --range narrows the full profile to the commits one push introduced: content that lives only
+#     on another branch must not fail a main push (measured 2026-11-26 on de-artifact). When the
+#     range cannot be measured — a new branch reports an all-zero tip, a force push dropped it — the
+#     scan reads every commit on the checked-out ref instead, never a shorter list.
+first="$(git -C "$repo" rev-parse HEAD~1)"
+head_sha="$(git -C "$repo" rev-parse HEAD)"
+: > "$work/args/gitleaks"
+run_scan --range "$first..$head_sha"
+expect_exit "push range exits 0" 0
+contains "push range scans only the pushed commits" "$(cat "$work/args/gitleaks")" "--log-opts=$first..$head_sha"
+missing "push range does not read every ref" "$(cat "$work/args/gitleaks")" "--log-opts=--all"
+: > "$work/args/gitleaks"
+run_scan --range "0000000000000000000000000000000000000000..$head_sha"
+expect_exit "an unmeasurable range still exits 0" 0
+contains "an unmeasurable range falls back to every commit on HEAD" "$(cat "$work/args/gitleaks")" "--log-opts=HEAD"
+contains "an unmeasurable range is announced" "$out" "reading every commit on the checked-out ref"
+: > "$work/args/gitleaks"
+run_scan --range "$head_sha..$first"
+contains "a range whose ends are reversed falls back" "$(cat "$work/args/gitleaks")" "--log-opts=HEAD"
+
 # 7b. A secret in a file the change does not touch does not block a pull request, and one in a
 #     changed file still does.
 leak() { printf '[{"RuleID":"generic-api-key","Description":"Generic API Key","File":"%s","StartLine":1,"Secret":"s","Match":"x"}]' "$1"; }
